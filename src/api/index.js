@@ -1,5 +1,6 @@
 import axios from 'axios'
 
+
 const api = axios.create({
     baseURL: 'http://localhost:8080',
     headers: {
@@ -16,6 +17,7 @@ api.interceptors.request.use(config => {
 })
 
 export default {
+
     // Auth
     login(credentials) {
         return api.post('/auth/login', credentials)
@@ -44,7 +46,7 @@ export default {
         return api.get(`/task/my/${taskId}`)
     },
     updateTaskStatus(taskId, status) {
-        return api.post(`/task/my/${taskId}/status`, { status })
+        return api.post(`/task/my/${taskId}/status`, { status });
     },
     shareTask(taskId, userId) {
         return api.post(`/task/my/${taskId}/share/${userId}`)
@@ -53,7 +55,11 @@ export default {
         return api.post(`/task/assign/${taskId}/${userId}`)
     },
     assignTaskToGroup(taskId, groupId) {
-        return api.post(`/task/assign/${taskId}/group/${groupId}`)
+        return api.post(`/task/assign/${taskId}/group/${groupId}`, {}, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
     },
 
     // Groups
@@ -61,10 +67,20 @@ export default {
         return api.get('/group')
     },
     createGroup(groupData) {
-        return api.post('/group', groupData)
+        return api.post('/group', groupData, {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+        });
+    },
+    getGroupInfo(groupId){
+        return api.get(`/group/${groupId}`)
     },
     deleteGroup(groupId) {
         return api.delete(`/group/${groupId}`)
+    },
+    getGroupTasks(groupId){
+        return api.get(`/group/${groupId}/tasks`)
     },
     getGroupStudents(groupId) {
         return api.get(`/group/${groupId}/students`)
@@ -75,6 +91,9 @@ export default {
     removeStudentFromGroup(groupId, studentId) {
         return api.delete(`/group/${groupId}/students/${studentId}`)
     },
+    getGroupData(){
+      return api.get('/user/my-group')
+    },
 
     // Users
     getUsers() {
@@ -84,7 +103,7 @@ export default {
         return api.post('/admin/users', userData)
     },
     updateUserRole(userId, role) {
-        return api.post(`/admin/users/${userId}/role`, { role })
+        return api.post(`/admin/users/${userId}/role?role=${role}`)
     },
     deleteUser(userId) {
         return api.delete(`/admin/users/${userId}/delete`)
@@ -96,5 +115,9 @@ export default {
     // User info
     getUserInfo() {
         return api.get('/user/me/info')
-    }
+    },
+    getStudentTasks(userId) {
+        return api.get(`/task/student/${userId}`);
+    },
+
 }

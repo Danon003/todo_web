@@ -49,6 +49,7 @@
 <script>
 import { ref, onMounted, computed } from 'vue';
 import axios from 'axios';
+import api from "@/api/index.js";
 
 export default {
   name: 'MyGroup',
@@ -63,23 +64,12 @@ export default {
       try {
         const token = localStorage.getItem('jwt-token');
 
-        const groupResponse = await axios.get('http://localhost:8080/user/my-group', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const groupResponse = await api.getGroupData();
 
         group.value = groupResponse.data;
 
         if (group.value) {
-          const membersResponse = await axios.get(
-              `http://localhost:8080/group/${group.value.id}/students`,
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`
-                }
-              }
-          );
+          const membersResponse = await api.getGroupStudents(group.value.id);
           members.value = membersResponse.data;
         }
       } catch (error) {

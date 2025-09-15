@@ -4,5 +4,4 @@ export default {
     createGroup(data) {
         return api.post('/group', data)
     },
-
 }

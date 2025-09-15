@@ -45,6 +45,7 @@
 <script>
 import axios from 'axios'
 import { useRouter } from 'vue-router'
+import api from "@/api/index.js";
 
 export default {
   name: 'Registration',
@@ -61,10 +62,9 @@ export default {
 
     const handleRegister = async () => {
       try {
-        const response = await axios.post('http://localhost:8080/auth/registration', {
+        const response = await api.register( {
           username: registerForm.username,
           password: registerForm.password,
-          name: registerForm.name,
           email: registerForm.email
         })
 

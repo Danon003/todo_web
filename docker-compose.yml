@@ -1,0 +1,13 @@
+services:
+  vue-app:
+    build: .
+    ports:
+      - "5177:5177"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - HOST=0.0.0.0
+      - PORT=5177
+    stdin_open: true
+    tty: true

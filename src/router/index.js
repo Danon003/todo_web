@@ -10,6 +10,7 @@ import GroupDetail from "@/views/profile/GroupDetail.vue";
 import Users from "@/views/profile/Users.vue";
 import Calendar from "@/views/profile/Calendar.vue";
 import MyGroup from "@/views/profile/my-group.vue";
+import Notifications from "@/views/profile/Notifications.vue";
 
 const routes = [
     {
@@ -74,6 +75,12 @@ const routes = [
                 component: MyGroup,
                 meta: { roles: ['ROLE_STUDENT'] }
             },
+            {
+                path: '/profile/notifications',
+                name: 'notifications',
+                component: Notifications,
+                meta: { requiresAuth: true, roles: ['ROLE_ADMIN', 'ROLE_TEACHER', 'ROLE_STUDENT'] }
+            }
         ]
     },
     {

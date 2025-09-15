@@ -58,14 +58,7 @@
             <label>Пароль:</label>
             <input v-model="newUser.password" type="password" required>
           </div>
-          <div class="form-group">
-            <label>Роль:</label>
-            <select v-model="newUser.role" required>
-              <option value="STUDENT">Студент</option>
-              <option value="TEACHER">Преподаватель</option>
-              <option value="ADMIN">Администратор</option>
-            </select>
-          </div>
+
           <button type="submit" class="submit-btn">Создать</button>
         </form>
       </div>
@@ -76,6 +69,7 @@
 <script>
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
+import api from "@/api/index.js";
 
 export default {
   name: 'Users',
@@ -93,18 +87,13 @@ export default {
 
     const fetchUsers = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        let url = 'http://localhost:8080/admin/users';
+        let response;
 
         if (filterRole.value !== 'all') {
-          url = `http://localhost:8080/admin/users/by-role?role=${filterRole.value}`;
+          response = await api.getUsersByRole(filterRole.value);
+        } else {
+          response = await api.getUsers();
         }
-
-        const response = await axios.get(url, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
 
         users.value = response.data.map(user => ({
           ...user,
@@ -138,14 +127,12 @@ export default {
 
     const createUser = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.post('http://localhost:8080/admin/users', newUser.value, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        await api.createUser(newUser.value);
+
         showCreateModal.value = false;
+
         await fetchUsers();
+
         newUser.value = {
           name: '',
           email: '',
@@ -153,6 +140,7 @@ export default {
           password: '',
           role: 'STUDENT'
         };
+
       } catch (error) {
         console.error('Ошибка при создании пользователя:', error);
         alert('Ошибка при создании пользователя: ' + (error.response?.data?.message || error.message));
@@ -161,20 +149,18 @@ export default {
 
     const updateUserRole = async (user) => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.post(`http://localhost:8080/admin/users/${user.id}/role?role=${user.newRole}`, {
-        }, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        await api.updateUserRole(user.id, user.newRole);
+
         await fetchUsers();
+
       } catch (error) {
         console.error('Ошибка при обновлении роли:', error);
+
         const originalUser = users.value.find(u => u.id === user.id);
         if (originalUser) {
           user.newRole = originalUser.role;
         }
+
         alert('Ошибка при обновлении роли: ' + (error.response?.data?.message || error.message));
       }
     };
@@ -183,13 +169,10 @@ export default {
       if (!confirm('Вы уверены, что хотите удалить этого пользователя?')) return;
 
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.delete(`http://localhost:8080/admin/users/${userId}/delete`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        await api.deleteUser(userId);
+
         await fetchUsers();
+
       } catch (error) {
         console.error('Ошибка при удалении пользователя:', error);
         alert('Ошибка при удалении пользователя: ' + (error.response?.data?.message || error.message));

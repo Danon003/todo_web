@@ -34,6 +34,8 @@
 <script>
 import axios from 'axios'
 import { useRouter } from 'vue-router'
+import api from '@/api'
+import {ref} from "vue";
 
 export default {
   name: 'Login',
@@ -43,22 +45,20 @@ export default {
       username: '',
       password: ''
     }
-    let error = ''
+    const error = ref('')
 
     const handleLogin = async () => {
       try {
-        const response = await axios.post(
-            'http://localhost:8080/auth/login',
-            {
-              username: loginForm.username,
-              password: loginForm.password
-            },
-            {
-              withCredentials: true
-            }
-        );
+        const response = await api.login({
+          username: loginForm.username,
+          password: loginForm.password
+        });
 
-        localStorage.setItem('jwt-token', response.data['jwt-token']);
+        // Сохраняем токен, если он приходит в ответе
+        if (response.data['jwt-token']) {
+          localStorage.setItem('jwt-token', response.data['jwt-token']);
+        }
+
         await router.push('/');
       } catch (err) {
         error.value = err.response?.data?.message || 'Ошибка при входе';
@@ -142,6 +142,12 @@ label {
   box-shadow: 0 2px 6px rgba(170, 250, 170, 0.3);
 }
 
+auth-link {
+  text-align: center;
+  margin-top: 20px;
+  color: #666;
+  font-size: 15px;
+}
 .auth-link a {
   color: #00bc85;
   text-decoration: none;

@@ -32,8 +32,8 @@
           <h4>{{ task.title }}</h4>
           <p class="deadline">До: {{ formatDateTime(task.deadline) }}</p>
           <p class="priority">Приоритет: {{ getPriorityText(task.priority) }}</p>
-          <p class="status" :class="'status-' + task.status.toLowerCase()">
-            {{ getStatusText(task.status) }}
+          <p class="status" :class="'status-' + task.userStatus.toLowerCase()">
+            {{ getStatusText(task.userStatus) }}
           </p>
         </div>
       </div>
@@ -47,6 +47,7 @@
 <script>
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
+import api from "@/api/index.js";
 
 export default {
   name: 'Calendar',
@@ -59,11 +60,7 @@ export default {
     const fetchTasks = async () => {
       try {
         const token = localStorage.getItem('jwt-token');
-        const response = await axios.get('http://localhost:8080/task/my', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const response = await api.getMyTasks();
         tasks.value = response.data;
       } catch (error) {
         console.error('Ошибка при получении задач:', error);
@@ -229,7 +226,8 @@ export default {
       const statusMap = {
         'NOT_STARTED': 'Не начата',
         'IN_PROGRESS': 'В процессе',
-        'COMPLETED': 'Завершено'
+        'COMPLETED': 'Завершена',
+        'OVERDUE': 'Просрочена'
       };
       return statusMap[status] || status;
     };
@@ -286,7 +284,6 @@ export default {
 <style scoped>
 .calendar-container {
   margin: 0;
-  max-width: 1000px;
 }
 
 .calendar-header {
@@ -394,7 +391,10 @@ export default {
   font-weight: bold;
   font-size: 0.9em;
 }
-
+.status-overdue {
+  background-color: #f8d7da;
+  color: #721c24;
+}
 .status-not_started {
   background-color: #FFF3CD;
   color: #856404;

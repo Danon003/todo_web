@@ -1,21 +1,21 @@
 <template>
   <div class="group-detail">
     <div v-if="loading" class="loading">Загрузка...</div>
+
     <div v-else-if="group" class="group-content">
       <div class="group-header">
         <h2>{{ group.name }}</h2>
         <p class="description">{{ group.description }}</p>
       </div>
 
+      <!-- Вкладки -->
       <div class="tabs">
         <button :class="{ active: activeTab === 'students' }" @click="activeTab = 'students'">
           Студенты
         </button>
-        <button :class="{ active: activeTab === 'tasks' }" @click="activeTab = 'tasks'">
-          Задачи
-        </button>
       </div>
 
+      <!-- Вкладка: Студенты -->
       <div v-if="activeTab === 'students'" class="students-tab">
         <div class="students-list">
           <div v-for="student in students" :key="student.id" class="student-card">
@@ -23,9 +23,19 @@
               <h4>{{ student.name }}</h4>
               <p>{{ student.email }}</p>
             </div>
-            <button v-if="user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER'"
-                    @click="removeStudent(student.id)"
-                    class="remove-btn">
+
+            <button
+                v-if="user.role === 'ROLE_TEACHER'"
+                @click="checkStudentTask(student.id)"
+                class="check-btn"
+            >
+              Назначенные задачи
+            </button>
+            <button
+                v-if="user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER'"
+                @click="removeStudent(student.id)"
+                class="remove-btn"
+            >
               Удалить
             </button>
           </div>
@@ -33,6 +43,7 @@
 
         <div v-if="user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER'" class="add-student">
           <select v-model="selectedStudent" class="student-select">
+            <option value="" disabled>Выберите студента</option>
             <option v-for="student in availableStudents" :key="student.id" :value="student.id">
               {{ student.name }} ({{ student.email }})
             </option>
@@ -41,18 +52,38 @@
         </div>
       </div>
 
-      <div v-if="activeTab === 'tasks'" class="tasks-tab">
-        <div class="tasks-list">
-          <div v-for="task in groupTasks" :key="task.id" class="task-card">
+      <!-- Вкладка: Задачи студента -->
+      <div v-else-if="activeTab === 'student-tasks'" class="tasks-tab">
+        <div class="student-header">
+          <h3>Задачи студента: {{ currentStudent?.username }}</h3>
+          <button @click="backToStudents" class="back-btn">← Назад к списку студентов</button>
+        </div>
+
+        <div v-if="loadingTasks" class="loading">Загрузка задач...</div>
+        <div v-else-if="studentTasks.length === 0" class="no-tasks">
+          У студента пока нет назначенных задач.
+        </div>
+        <div v-else class="tasks-list">
+          <div v-for="task in studentTasks" :key="task.id" class="task-card">
             <h4>{{ task.title }}</h4>
-            <p class="deadline">До: {{ formatDate(task.deadline) }}</p>
-            <p class="status" :class="'status-' + task.status.toLowerCase()">
-              {{ getStatusText(task.status) }}
-            </p>
+            <p class="description" v-if="task.description">{{ task.description }}</p>
+            <p class="deadline">Дедлайн: {{ formatDate(task.deadline) }}</p>
+            <span
+                class="status"
+                :class="{
+                  'status-not_started': task.userStatus === 'NOT_STARTED',
+                  'status-in_progress': task.userStatus === 'IN_PROGRESS',
+                  'status-completed': task.userStatus === 'COMPLETED',
+                  'status-overdue': task.userStatus === 'OVERDUE'
+                }"
+              >
+              {{ getStatusText(task.userStatus) }}
+            </span>
           </div>
         </div>
       </div>
     </div>
+
     <div v-else class="not-found">
       Группа не найдена
     </div>
@@ -62,7 +93,7 @@
 <script>
 import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
-import axios from 'axios';
+import api from "@/api/index.js";
 
 export default {
   name: 'GroupDetail',
@@ -71,59 +102,37 @@ export default {
     const group = ref(null);
     const students = ref([]);
     const availableStudents = ref([]);
-    const groupTasks = ref([]);
     const selectedStudent = ref('');
     const activeTab = ref('students');
     const loading = ref(true);
     const user = JSON.parse(localStorage.getItem('user') || {});
 
+    // --- Новые переменные ---
+    const currentStudent = ref(null);        // текущий выбранный студент
+    const studentTasks = ref([]);            // задачи студента
+    const loadingTasks = ref(false);         // индикатор загрузки задач
+
+    // --- Получение данных группы ---
     const fetchGroupData = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
-
-        // Получаем информацию о группе
-        const groupResponse = await axios.get(`http://localhost:8080/group/${route.params.groupId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        // Информация о группе
+        const groupResponse = await api.getGroupInfo(route.params.groupId);
         group.value = groupResponse.data;
 
-        // Получаем студентов группы
-        const studentsResponse = await axios.get(
-            `http://localhost:8080/group/${route.params.groupId}/students`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
+        // Студенты группы
+        const studentsResponse = await api.getGroupStudents(route.params.groupId);
         students.value = studentsResponse.data;
 
-        // Получаем доступных студентов (для добавления в группу)
+        // Доступные студенты (для добавления)
         if (user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER') {
-          const availableResponse = await axios.get(
-              'http://localhost:8080/admin/users/by-role?role=STUDENT',
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`
-                }
-              }
-          );
+          const availableResponse = await api.getUsersByRole('STUDENT');
           availableStudents.value = availableResponse.data;
         }
 
-        // Получаем задачи группы
+        // Задачи группы (если нужно)
         try {
-          const tasksResponse = await axios.get(
-              `http://localhost:8080/group/${route.params.groupId}/tasks`,
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`
-                }
-              }
-          );
-          groupTasks.value = tasksResponse.data;
+          const tasksResponse = await api.getGroupTasks(route.params.groupId);
+          // groupTasks.value = tasksResponse.data; // если используешь
         } catch (error) {
           console.log('Не удалось получить задачи группы:', error);
         }
@@ -136,87 +145,93 @@ export default {
 
     onMounted(fetchGroupData);
 
+    // --- Новый метод: просмотр задач студента ---
+    const checkStudentTask = async (studentId) => {
+      loadingTasks.value = true;
+      try {
+        // Находим студента по ID
+        const student = students.value.find(s => s.id === studentId);
+        currentStudent.value = student;
+
+        // Загружаем его задачи
+        const response = await api.getStudentTasks(studentId);
+        studentTasks.value = response.data;
+
+        // Переключаемся на вкладку с задачами
+        activeTab.value = 'student-tasks';
+      } catch (error) {
+        console.error('Ошибка при загрузке задач студента:', error);
+        alert('Не удалось загрузить задачи студента.');
+      } finally {
+        loadingTasks.value = false;
+      }
+    };
+
+    // --- Возврат к списку студентов ---
+    const backToStudents = () => {
+      activeTab.value = 'students';
+      currentStudent.value = null;
+      studentTasks.value = [];
+    };
+
+    // --- Форматирование даты ---
     const formatDate = (dateString) => {
-      return new Date(dateString).toLocaleString();
+      return new Date(dateString).toLocaleDateString();
     };
 
     const getStatusText = (status) => {
       const statusMap = {
         'NOT_STARTED': 'Не начата',
         'IN_PROGRESS': 'В процессе',
-        'COMPLETED': 'Завершено'
+        'COMPLETED': 'Завершена',
+        'OVERDUE': 'Просрочена'
       };
       return statusMap[status] || status;
     };
 
+    // --- Управление студентами ---
     const addStudent = async () => {
       if (!selectedStudent.value) return;
-
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.post(
-            `http://localhost:8080/group/${route.params.groupId}/students/${selectedStudent.value}`,
-            {},
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
+        await api.addStudentToGroup(route.params.groupId, selectedStudent.value);
         await fetchGroupData();
         selectedStudent.value = '';
       } catch (error) {
         console.error('Ошибка при добавлении студента:', error);
+        alert('Не удалось добавить студента.');
       }
     };
 
     const removeStudent = async (studentId) => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.delete(
-            `http://localhost:8080/group/${route.params.groupId}/students/${studentId}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
+        await api.removeStudentFromGroup(route.params.groupId, studentId);
         await fetchGroupData();
       } catch (error) {
         console.error('Ошибка при удалении студента:', error);
-      }
-    };
-
-    const assignTaskToGroup = async (taskId) => {
-      try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.post(
-            `http://localhost:8080/task/assign/${taskId}/group/${route.params.groupId}`, {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
-        alert('Задача успешно назначена группе');
-      } catch (error) {
-        console.error('Ошибка при назначении задачи группе:', error);
+        alert('Не удалось удалить студента.');
       }
     };
 
     return {
+      // данные
       group,
       students,
       availableStudents,
-      groupTasks,
       selectedStudent,
       activeTab,
       loading,
       user,
+      currentStudent,
+      studentTasks,
+      loadingTasks,
+
+      // методы
       formatDate,
       getStatusText,
       addStudent,
       removeStudent,
-      assignTaskToGroup
+      checkStudentTask,
+      backToStudents
     };
   }
 };
@@ -248,8 +263,8 @@ export default {
   border-bottom: 1px solid #ddd;
   margin-bottom: 20px;
 }
-
 .tabs button {
+  display: block;
   padding: 10px 20px;
   background: none;
   border: none;
@@ -275,7 +290,6 @@ export default {
   border-radius: 8px;
   padding: 15px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  display: flex;
   justify-content: space-between;
   align-items: center;
 }
@@ -294,6 +308,15 @@ export default {
   background-color: #DC3545;
   color: white;
   padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.check-btn {
+  background-color: #bb8213;
+  color: white;
+  padding: 5px 10px;
+  margin-right: 5px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -375,5 +398,62 @@ export default {
   border-radius: 4px;
   cursor: pointer;
   margin-top: 10px;
+}
+
+.student-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #ffffff;
+  padding-bottom: 10px;
+}
+
+.back-btn {
+  background: #7fb3e0;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.no-tasks {
+  text-align: center;
+  color: #666;
+  padding: 20px;
+  font-style: italic;
+}
+.status {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: bold;
+  display: inline-block;
+  font-size: 0.85em;
+}
+
+.status-not_started,
+.status-NOT_STARTED {
+  background-color: #FFF3CD;
+  color: #856404;
+}
+
+.status-in_progress,
+.status-IN_PROGRESS {
+  background-color: #D1ECF1;
+  color: #0C5460;
+}
+
+.status-completed,
+.status-COMPLETED {
+  background-color: #D4EDDA;
+  color: #155724;
+}
+
+.status-overdue,
+.status-OVERDUE {
+  background-color: #f8d7da;
+  color: #721c24;
 }
 </style>

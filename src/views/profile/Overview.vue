@@ -7,6 +7,7 @@
 <script>
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
+import api from "@/api/index.js";
 
 export default {
   name: 'Overview',
@@ -16,9 +17,7 @@ export default {
     const fetchUser = async () => {
       try {
         const token = localStorage.getItem('jwt-token')
-        const response = await axios.get('http://localhost:8080/user/me/info', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
+        const response = await api.getUserInfo()
         user.value = response.data
       } catch (error) {
         console.error('Ошибка загрузки пользователя:', error)

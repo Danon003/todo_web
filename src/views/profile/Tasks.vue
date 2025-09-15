@@ -12,7 +12,9 @@
         <option value="all">Все статусы</option>
         <option value="NOT_STARTED">Не начата</option>
         <option value="IN_PROGRESS">В процессе</option>
-        <option value="COMPLETED">Завершено</option>
+        <option value="COMPLETED">Завершена</option>
+        <option value="OVERDUE">Просрочена</option>
+
       </select>
       <select v-model="sortField" class="filter-select">
         <option value="deadline">По дате</option>
@@ -27,22 +29,42 @@
         <div class="task-meta">
           <span class="deadline">До: {{ formatDate(task.deadline) }}</span>
           <span class="priority">Приоритет: {{ getPriorityText(task.priority) }}</span>
-          <span class="status" :class="'status-' + task.status.toLowerCase()">
-            {{ getStatusText(task.status) }}
+          <span
+              v-if="user.role === 'ROLE_STUDENT'"
+              class="status" :class="'status-' + task.userStatus.toLowerCase()">
+            {{ getStatusText(task.userStatus) }}
           </span>
         </div>
         <div class="task-actions">
           <button @click="viewTask(task.id)" class="action-btn view">Просмотр</button>
-          <button v-if="user.role === 'ROLE_STUDENT'"
-                  @click="openStatusModal(task)"
-                  class="action-btn update">
+          <button
+              v-if="user.role === 'ROLE_STUDENT' && task.userStatus !== 'OVERDUE'"
+              @click="openStatusModal(task)"
+              class="action-btn update"
+          >
             Обновить статус
           </button>
-          <button v-if="user.role === 'ROLE_STUDENT'"
-                  @click="openShareModal(task)"
-                  class="action-btn share">
+
+          <span
+              v-else-if="user.role === 'ROLE_STUDENT' && task.userStatus === 'OVERDUE'"
+              class="status-locked"
+          >
+            Статус недоступен
+          </span>
+          <button
+              v-if="user.role === 'ROLE_STUDENT' && task.userStatus !== 'OVERDUE'"
+              @click="openShareModal(task)"
+              class="action-btn share"
+          >
             Поделиться
           </button>
+
+          <span
+              v-else-if="user.role === 'ROLE_STUDENT' && task.userStatus === 'OVERDUE'"
+              class="status-locked"
+          >
+            Нельзя поделиться
+          </span>
         </div>
       </div>
     </div>
@@ -86,8 +108,8 @@
         <form @submit.prevent="updateTaskStatus">
           <div class="form-group">
             <label>Текущий статус:</label>
-            <span class="current-status" :class="'status-' + currentTask.status.toLowerCase()">
-              {{ getStatusText(currentTask.status) }}
+            <span class="current-status" :class="'status-' + currentTask.userStatus.toLowerCase()">
+              {{ getStatusText(currentTask.userStatus) }}
             </span>
           </div>
           <div class="form-group">
@@ -95,7 +117,8 @@
             <select v-model="selectedStatus" required>
               <option value="NOT_STARTED">Не начата</option>
               <option value="IN_PROGRESS">В процессе</option>
-              <option value="COMPLETED">Завершено</option>
+              <option value="COMPLETED">Завершена</option>
+
             </select>
           </div>
           <button type="submit" class="submit-btn">Обновить</button>
@@ -154,6 +177,7 @@
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import { useRouter } from 'vue-router';
+import api from "@/api/index.js";
 
 export default {
   name: 'Tasks',
@@ -167,6 +191,7 @@ export default {
     const showShareModal = ref(false);
     const currentTask = ref({});
     const selectedStatus = ref('NOT_STARTED');
+
     const newTask = ref({
       title: '',
       description: '',
@@ -185,18 +210,13 @@ export default {
 
     const fetchTasks = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        let url = '/task/my';
         if (user.role === 'ROLE_TEACHER') {
-          url = '/task';
+          const response = await api.getTasks();
+          tasks.value = response.data;
+        } else {
+          const response = await api.getMyTasks();
+          tasks.value = response.data; // ← уже содержит userStatus
         }
-
-        const response = await axios.get(`http://localhost:8080${url}`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        tasks.value = response.data;
       } catch (error) {
         console.error('Ошибка при получении задач:', error);
       }
@@ -208,11 +228,7 @@ export default {
         const token = localStorage.getItem('jwt-token');
 
         // 1. Получаем информацию о группе пользователя
-        const groupResponse = await axios.get('http://localhost:8080/user/my-group', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const groupResponse = await api.getGroupData();
 
         const groupId = groupResponse.data.id;
         if (!groupId) {
@@ -220,14 +236,7 @@ export default {
         }
 
         // 2. Получаем участников группы
-        const membersResponse = await axios.get(
-            `http://localhost:8080/group/${groupId}/students`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
+        const membersResponse = await api.getGroupStudents(groupId);
 
         // Сохраняем участников группы, исключая текущего пользователя
         groupMembers.value = membersResponse.data.filter(member =>
@@ -251,7 +260,7 @@ export default {
       let result = [...tasks.value];
 
       if (filterStatus.value !== 'all') {
-        result = result.filter(task => task.status === filterStatus.value);
+        result = result.filter(task => task.userStatus === filterStatus.value);
       }
 
       result.sort((a, b) => {
@@ -284,7 +293,8 @@ export default {
       const statusMap = {
         'NOT_STARTED': 'Не начата',
         'IN_PROGRESS': 'В процессе',
-        'COMPLETED': 'Завершено'
+        'COMPLETED': 'Завершено',
+        'OVERDUE': 'Просрочена'
       };
       return statusMap[status] || status;
     };
@@ -310,7 +320,7 @@ export default {
 
     const openStatusModal = (task) => {
       currentTask.value = task;
-      selectedStatus.value = task.status;
+      selectedStatus.value = task.userStatus;
       showStatusModal.value = true;
     };
 
@@ -328,18 +338,12 @@ export default {
 
     const updateTaskStatus = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.post(
-            `http://localhost:8080/task/my/${currentTask.value.id}/status`,
-            { status: selectedStatus.value },
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
+
+        await api.updateTaskStatus(currentTask.value.id, selectedStatus.value);
+
         showStatusModal.value = false;
-        await fetchTasks();
+        await fetchTasks(); // или fetchTask()
+
       } catch (error) {
         console.error('Ошибка при обновлении статуса:', error);
         alert('Не удалось обновить статус задачи');
@@ -352,14 +356,8 @@ export default {
       sharingInProgress.value = true;
       try {
         const token = localStorage.getItem('jwt-token');
-        const response = await axios.post(
-            `http://localhost:8080/task/my/${taskToShare.value.id}/share/${selectedMember.value}`,
-            {}, // Пустое тело запроса
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
+        const response = await api.shareTask(
+            taskToShare.value.id, selectedMember.value
         );
 
         if (response.status === 200) {
@@ -389,11 +387,7 @@ export default {
     const createTask = async () => {
       try {
         const token = localStorage.getItem('jwt-token');
-        await axios.post('http://localhost:8080/task', newTask.value, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        await api.createTask(newTask.value);
         showCreateModal.value = false;
         await fetchTasks();
         newTask.value = {
@@ -512,7 +506,10 @@ export default {
   background-color: #FFF3CD;
   color: #856404;
 }
-
+.status-overdue {
+  background-color: #f8d7da;
+  color: #721c24;
+}
 .status-in_progress {
   background-color: #D1ECF1;
   color: #0C5460;
@@ -545,7 +542,15 @@ export default {
   background-color: #FFC107;
   color: black;
 }
-
+.status-locked {
+  font-size: 0.8em;
+  color: #6c757d;
+  background-color: #e9ecef;
+  padding: 5px 10px;
+  border-radius: 4px;
+  margin-top: 5px;
+  display: inline-block;
+}
 .assign {
   background-color: #1782e1;
   color: white;

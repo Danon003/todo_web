@@ -30,6 +30,7 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { useRouter } from 'vue-router'
+import api from "@/api/index.js";
 
 export default {
   name: 'Profile',
@@ -60,11 +61,7 @@ export default {
     const fetchUserData = async () => {
       try {
         const token = localStorage.getItem('jwt-token')
-        const response = await axios.get('http://localhost:8080/user/me/info', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        })
+        const response = await api.getUserInfo()
 
         user.value = response.data
         localStorage.setItem('user', JSON.stringify(response.data))
@@ -79,18 +76,21 @@ export default {
         'ROLE_ADMIN': [
           { path: '/profile', title: 'Обзор', name: 'profile-overview' },
           { path: '/profile/groups', title: 'Управление группами', name: 'groups' },
-          { path: '/profile/users', title: 'Управление пользователями', name: 'users' }
+          { path: '/profile/users', title: 'Управление пользователями', name: 'users' },
+          {path: '/profile/notifications', title: 'Уведомления', name: 'notifications'}
         ],
         'ROLE_TEACHER': [
           { path: '/profile', title: 'Обзор', name: 'profile-overview' },
           { path: '/profile/tasks', title: 'Задачи', name: 'tasks' },
           { path: '/profile/groups', title: 'Группы', name: 'groups' },
+          {path: '/profile/notifications', title: 'Уведомления', name: 'notifications'}
         ],
         'ROLE_STUDENT': [
           { path: '/profile', title: 'Обзор', name: 'profile-overview' },
           { path: '/profile/tasks', title: 'Мои задачи', name: 'tasks' },
           { path: '/profile/calendar', title: 'Календарь', name: 'calendar' },
-          { path: '/profile/my-group', title: 'Моя группа', name: 'my-group' }
+          { path: '/profile/my-group', title: 'Моя группа', name: 'my-group' },
+          {path: '/profile/notifications', title: 'Уведомления', name: 'notifications'}
         ]
       };
 
@@ -174,7 +174,7 @@ nav {
 
 .main-content {
   flex: 1;
-  padding: 30px;
+  padding: 30px 15px;
   background: #f5f7fa;
 }
 </style>

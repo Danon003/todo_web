@@ -14,10 +14,6 @@
 
         <div class="task-info">
           <div class="info-item">
-            <span class="label">Статус:</span>
-            <span class="value status" :class="'status-' + task.status.toLowerCase()">
-              {{ getStatusText(task.status) }}
-            </span>
           </div>
           <div class="info-item">
             <span class="label">Дедлайн:</span>
@@ -135,7 +131,8 @@
 <script>
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import axios from 'axios';
+import api from "@/api/index.js";
+import axios from "axios";
 export default {
   name: 'TaskDetail',
   setup() {
@@ -154,18 +151,13 @@ export default {
 
     const fetchTask = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        let url = `/task/my/${route.params.taskId}`;
         if (user.role === 'ROLE_TEACHER') {
-          url = `/task/${route.params.taskId}`;
+          const response = await api.getTask(route.params.taskId);
+          task.value = response.data;
+        } else {
+          const response = await api.getMyTask(route.params.taskId);
+          task.value = response.data; // ← содержит userStatus
         }
-
-        const response = await axios.get(`http://localhost:8080${url}`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        task.value = response.data;
       } catch (error) {
         console.error('Ошибка при получении задачи:', error);
       } finally {
@@ -177,11 +169,7 @@ export default {
       groupsLoading.value = true;
       try {
         const token = localStorage.getItem('jwt-token');
-        const response = await axios.get('http://localhost:8080/group', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const response = await api.getGroups();
         groups.value = response.data;
       } catch (error) {
         console.error('Ошибка при получении групп:', error);
@@ -201,7 +189,8 @@ export default {
       const statusMap = {
         'NOT_STARTED': 'Не начата',
         'IN_PROGRESS': 'В процессе',
-        'COMPLETED': 'Завершено'
+        'COMPLETED': 'Завершена',
+        'OVERDUE': 'Просрочена'
       };
       return statusMap[status] || status;
     };
@@ -218,13 +207,7 @@ export default {
     const updateStatus = async () => {
       try {
         const token = localStorage.getItem('jwt-token');
-        await axios.post(`http://localhost:8080/task/my/${route.params.taskId}/status`, {
-          status: '' // Можно сделать выбор статуса
-        }, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        await api.updateTaskStatus(route.params.taskId, {status: ''});
         await fetchTask();
       } catch (error) {
         console.error('Ошибка при обновлении статуса:', error);
@@ -247,7 +230,7 @@ export default {
       try {
         const token = localStorage.getItem('jwt-token');
         await axios.post(
-            `http://localhost:8080/task/assign/${route.params.taskId}/group/${selectedGroupId.value}`,
+            `http://host.docker.internal:8080/task/assign/${route.params.taskId}/group/${selectedGroupId.value}`,
             {},
             {
               headers: {
@@ -270,7 +253,7 @@ export default {
     const deleteTask = async () => {
       try {
         const token = localStorage.getItem('jwt-token');
-        await axios.delete(`http://localhost:8080/task/${route.params.taskId}`, {
+        await axios.delete(`http://host.docker.internal:8080/task/${route.params.taskId}`, {
           headers: {
             Authorization: `Bearer ${token}`
           }
@@ -295,11 +278,7 @@ export default {
       studentsError.value = null;
       try {
         const token = localStorage.getItem('jwt-token');
-        const response = await axios.get('http://localhost:8080/admin/users/by-role?role=STUDENT', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const response = await api.getUsersByRole('STUDENT');
 
         // Проверяем структуру ответа
         if (Array.isArray(response.data)) {
@@ -344,7 +323,7 @@ export default {
       try {
         const token = localStorage.getItem('jwt-token');
         await axios.post(
-            `http://localhost:8080/task/assign/${route.params.taskId}/${selectedStudentId.value}`,
+            `http://host.docker.internal:8080/task/assign/${route.params.taskId}/${selectedStudentId.value}`,
             {},
             {
               headers: {
@@ -490,13 +469,17 @@ export default {
   padding: 3px 8px;
   border-radius: 4px;
   font-weight: bold;
+  .status-not_started {
+  background-color: #FFF3CD;
+  color: #856404;
+  }
+  .status-overdue {
+    background-color: #f8d7da;
+    color: #721c24;
+  }
 }
 
 /* Стили статусов */
-.status-not_started {
-  background-color: #FFF3CD;
-  color: #856404;
-}
 
 .status-in_progress {
   background-color: #D1ECF1;

@@ -50,6 +50,7 @@
 import { ref, onMounted} from 'vue';
 import axios from 'axios';
 import { useRouter } from 'vue-router';
+import api from "@/api/index.js";
 
 export default {
   name: 'Groups',
@@ -68,11 +69,7 @@ export default {
     const fetchGroups = async () => {
       try {
         const token = localStorage.getItem('jwt-token');
-        const response = await axios.get('http://localhost:8080/group', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const response = await api.getGroups();
         groups.value = response.data;
 
         // Для каждой группы загружаем студентов и задачи
@@ -88,14 +85,7 @@ export default {
     const fetchStudentsForGroup = async (groupId) => {
       try {
         const token = localStorage.getItem('jwt-token');
-        const response = await axios.get(
-            `http://localhost:8080/group/${groupId}/students`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
+        const response = await api.getGroupStudents(groupId);
 
         // Сохраняем студентов в объект по ID группы
         studentsByGroup.value = {
@@ -124,17 +114,11 @@ export default {
 
     const createGroup = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        const params = new URLSearchParams();
-        params.append('name', newGroup.value.name);
-        params.append('description', newGroup.value.description);
+        const groupData = new URLSearchParams();
+        groupData.append('name', newGroup.value.name);
+        groupData.append('description', newGroup.value.description);
 
-        await axios.post(`http://localhost:8080/group?${params.toString()}`, null, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
-        });
+        await api.createGroup(groupData);
 
         showCreateModal.value = false;
         await fetchGroups();
@@ -144,7 +128,7 @@ export default {
         };
       } catch (error) {
         console.error('Ошибка при создании группы:', error);
-        if (error.response && error.response.status === 403) {
+        if (error.response?.status === 403) {
           alert('У вас нет прав для создания групп');
         } else {
           alert('Произошла ошибка при создании группы');
@@ -155,11 +139,7 @@ export default {
     const deleteGroup = async (groupId) => {
       try {
         const token = localStorage.getItem('jwt-token');
-        await axios.delete(`http://localhost:8080/group/${groupId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        await api.deleteGroup(groupId);
         await fetchGroups();
       } catch (error) {
         console.error('Ошибка при удалении группы:', error);
