@@ -13,9 +13,20 @@
         <p>{{ group.description }}</p>
         <div class="group-meta">
           <span>Студентов: {{ studentCount(group.id) }}</span>
+          <span v-if="getTeacherName(group.teacherId)" class="teacher-info">
+    Ответственный: {{ getTeacherName(group.teacherId) }}
+  </span>
+          <span v-else class="no-teacher">
+    Ответственный не назначен
+  </span>
         </div>
         <div class="group-actions">
           <button @click="viewGroup(group.id)" class="action-btn view">Просмотр</button>
+          <button v-if="user.role === 'ROLE_ADMIN'"
+                  @click="openAssignTeacherModal(group)"
+                  class="action-btn assign">
+            {{ group.teacherId ? 'Сменить ответственного' : 'Назначить ответственного' }}
+          </button>
           <button v-if="user.role === 'ROLE_ADMIN'"
                   @click="deleteGroup(group.id)"
                   class="action-btn delete">
@@ -43,12 +54,46 @@
         </form>
       </div>
     </div>
+
+    <!-- Модальное окно назначения преподавателя -->
+    <div v-if="showAssignTeacherModal" class="modal">
+      <div class="modal-content">
+        <span class="close" @click="showAssignTeacherModal = false">&times;</span>
+        <h3>Назначить ответственного преподавателя</h3>
+        <p class="modal-subtitle">Группа: {{ selectedGroup?.name }}</p>
+
+        <div class="teachers-list">
+          <div v-for="teacher in teachers" :key="teacher.id"
+               class="teacher-card"
+               :class="{ 'selected': selectedTeacher?.id === teacher.id }"
+               @click="selectTeacher(teacher)">
+            <div class="teacher-info">
+              <h4>{{ teacher.name }}</h4>
+              <p>{{ teacher.email }}</p>
+            </div>
+            <div class="teacher-check">
+              <span v-if="selectedTeacher?.id === teacher.id" class="checkmark">✓</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button @click="assignTeacher"
+                  :disabled="!selectedTeacher"
+                  class="submit-btn">
+            Назначить
+          </button>
+          <button @click="showAssignTeacherModal = false" class="cancel-btn">
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted} from 'vue';
-import axios from 'axios';
+import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import api from "@/api/index.js";
 
@@ -57,37 +102,24 @@ export default {
   setup() {
     const router = useRouter();
     const groups = ref([]);
-    const studentsByGroup = ref({}); // Храним студентов по ID группы
+    const studentsByGroup = ref({});
+    const teachers = ref([]);
     const showCreateModal = ref(false);
+    const showAssignTeacherModal = ref(false);
+    const selectedGroup = ref(null);
+    const selectedTeacher = ref(null);
+
     const newGroup = ref({
       name: '',
       description: ''
     });
+
     const user = JSON.parse(localStorage.getItem('user') || {});
-
-    // Получаем список всех групп
-    const fetchGroups = async () => {
-      try {
-        const token = localStorage.getItem('jwt-token');
-        const response = await api.getGroups();
-        groups.value = response.data;
-
-        // Для каждой группы загружаем студентов и задачи
-        groups.value.forEach(group => {
-          fetchStudentsForGroup(group.id);
-        });
-      } catch (error) {
-        console.error('Ошибка при получении групп:', error);
-      }
-    };
 
     // Получаем студентов для конкретной группы
     const fetchStudentsForGroup = async (groupId) => {
       try {
-        const token = localStorage.getItem('jwt-token');
         const response = await api.getGroupStudents(groupId);
-
-        // Сохраняем студентов в объект по ID группы
         studentsByGroup.value = {
           ...studentsByGroup.value,
           [groupId]: response.data
@@ -101,12 +133,87 @@ export default {
       }
     };
 
+    const fetchGroups = async () => {
+      try {
+        const response = await api.getGroups();
+        groups.value = response.data;
+        groups.value.forEach(group => {
+          fetchStudentsForGroup(group.id);
+        });
+      } catch (error) {
+        console.error('Ошибка при получении групп:', error);
+      }
+    };
+
+    const fetchTeachers = async () => {
+      try {
+        const response = await api.getUsersByRole('TEACHER');
+        teachers.value = response.data;
+        console.log('Loaded teachers:', teachers.value); // Добавь эту строку
+      } catch (error) {
+        console.error('Ошибка при получении преподавателей:', error);
+      }
+    };
+
+    const getTeacherName = (teacherId) => {
+      if (!teacherId) return null;
+
+      // Используем teachers из модального окна (они уже загружены там)
+      const teacher = teachers.value.find(t => t.id === teacherId);
+
+      // Если не нашли, возвращаем заглушку с ID для отладки
+      return teacher ? teacher.username : `Преподаватель #${teacherId}`;
+    };
+
+    const openAssignTeacherModal = async (group) => {
+      selectedGroup.value = group;
+      selectedTeacher.value = null;
+
+      await fetchTeachers();
+
+      if (group.teacherId) {
+        const currentTeacher = teachers.value.find(t => t.id === group.teacherId);
+        if (currentTeacher) {
+          selectedTeacher.value = currentTeacher;
+        }
+      }
+
+      showAssignTeacherModal.value = true;
+    };
+
+    const selectTeacher = (teacher) => {
+      selectedTeacher.value = teacher;
+    };
+
+    const assignTeacher = async () => {
+      if (!selectedGroup.value || !selectedTeacher.value) return;
+
+      try {
+        await api.assignTeacherToGroup(selectedGroup.value.id, selectedTeacher.value.id);
+
+        const groupIndex = groups.value.findIndex(g => g.id === selectedGroup.value.id);
+        if (groupIndex !== -1) {
+          groups.value[groupIndex].teacherId = selectedTeacher.value.id;
+          groups.value[groupIndex].teacherName = selectedTeacher.value.name;
+        }
+
+        showAssignTeacherModal.value = false;
+        alert('Преподаватель успешно назначен!');
+      } catch (error) {
+        console.error('Ошибка при назначении преподавателя:', error);
+        alert('Произошла ошибка при назначении преподавателя');
+      }
+    };
+
     // Вычисляем количество студентов для группы
     const studentCount = (groupId) => {
       return studentsByGroup.value[groupId]?.length || 0;
     };
 
-    onMounted(fetchGroups);
+    onMounted(() => {
+       fetchTeachers(); // Сначала загружаем преподавателей
+       fetchGroups();
+    });
 
     const viewGroup = (groupId) => {
       router.push(`/profile/groups/${groupId}`);
@@ -137,8 +244,9 @@ export default {
     };
 
     const deleteGroup = async (groupId) => {
+      if (!confirm('Вы уверены, что хотите удалить эту группу?')) return;
+
       try {
-        const token = localStorage.getItem('jwt-token');
         await api.deleteGroup(groupId);
         await fetchGroups();
       } catch (error) {
@@ -148,13 +256,21 @@ export default {
 
     return {
       groups,
+      teachers,
       showCreateModal,
+      showAssignTeacherModal,
       newGroup,
+      selectedGroup,
+      selectedTeacher,
       user,
       studentCount,
       viewGroup,
       createGroup,
-      deleteGroup
+      deleteGroup,
+      openAssignTeacherModal,
+      selectTeacher,
+      getTeacherName,
+      assignTeacher
     };
   }
 };
@@ -279,5 +395,171 @@ export default {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+}
+.modal-subtitle {
+  margin-bottom: 20px;
+  font-weight: bold;
+  color: #333;
+}
+
+.teachers-list {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+}
+
+.teacher-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.teacher-card:hover {
+  background-color: #f5f5f5;
+}
+
+.teacher-card.selected {
+  border-color: #4CAF50;
+  background-color: #f0fff0;
+}
+
+.teacher-info h4 {
+  margin: 0 0 5px 0;
+  color: #333;
+}
+
+.teacher-info p {
+  margin: 0 0 5px 0;
+  color: #666;
+  font-size: 0.9em;
+}
+
+.groups-count {
+  font-size: 0.8em;
+  color: #888;
+}
+
+.teacher-check {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #ddd;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.teacher-card.selected .teacher-check {
+  border-color: #4CAF50;
+  background-color: #4CAF50;
+}
+
+.checkmark {
+  color: white;
+  font-weight: bold;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.cancel-btn {
+  background-color: #6c757d;
+  color: white;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.submit-btn:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.teacher-info {
+  flex: 1;
+}
+.teachers-list {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+}
+
+.teacher-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.teacher-card:hover {
+  background-color: #f5f5f5;
+}
+
+.teacher-card.selected {
+  border-color: #4CAF50;
+  background-color: #f0fff0;
+}
+
+.teacher-info h4 {
+  margin: 0 0 5px 0;
+}
+
+.teacher-info p {
+  margin: 0;
+  color: #666;
+}
+
+.teacher-check {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #ddd;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.teacher-card.selected .teacher-check {
+  border-color: #4CAF50;
+  background-color: #4CAF50;
+}
+
+.checkmark {
+  color: white;
+  font-weight: bold;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.submit-btn:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+.no-teacher {
+  color: #dc3545;
+  font-style: italic;
+}
+
+.teacher-info {
+  color: #28a745;
+  font-weight: 500;
 }
 </style>

@@ -2,9 +2,16 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 import {inject} from "vue";
+import {nodePolyfills} from "vite-plugin-node-polyfills";
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(),
+    nodePolyfills({
+      include: ['global'], // полифиллим только global
+      globals: {
+        global: true, // обеспечит window.global = globalThis
+      },
+    }),],
   server: {
     host: '0.0.0.0',
     port: 5177,

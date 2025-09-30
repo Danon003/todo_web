@@ -13,10 +13,13 @@
         <button :class="{ active: activeTab === 'students' }" @click="activeTab = 'students'">
           Студенты
         </button>
+
       </div>
 
       <!-- Вкладка: Студенты -->
       <div v-if="activeTab === 'students'" class="students-tab">
+        <button @click="backToGroups" class="back-btn">← Назад к списку групп</button>
+
         <div class="students-list">
           <div v-for="student in students" :key="student.id" class="student-card">
             <div class="student-info">
@@ -76,7 +79,7 @@
                   'status-completed': task.userStatus === 'COMPLETED',
                   'status-overdue': task.userStatus === 'OVERDUE'
                 }"
-              >
+            >
               {{ getStatusText(task.userStatus) }}
             </span>
           </div>
@@ -94,6 +97,7 @@
 import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import api from "@/api/index.js";
+import router from "@/router/index.js";
 
 export default {
   name: 'GroupDetail',
@@ -174,6 +178,10 @@ export default {
       studentTasks.value = [];
     };
 
+    const backToGroups = () => {
+      router.push('/profile/groups');
+    }
+
     // --- Форматирование даты ---
     const formatDate = (dateString) => {
       return new Date(dateString).toLocaleDateString();
@@ -231,7 +239,8 @@ export default {
       addStudent,
       removeStudent,
       checkStudentTask,
-      backToStudents
+      backToStudents,
+      backToGroups
     };
   }
 };

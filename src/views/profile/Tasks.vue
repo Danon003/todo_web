@@ -8,14 +8,6 @@
     </div>
 
     <div class="filters">
-      <select v-model="filterStatus" class="filter-select">
-        <option value="all">Все статусы</option>
-        <option value="NOT_STARTED">Не начата</option>
-        <option value="IN_PROGRESS">В процессе</option>
-        <option value="COMPLETED">Завершена</option>
-        <option value="OVERDUE">Просрочена</option>
-
-      </select>
       <select v-model="sortField" class="filter-select">
         <option value="deadline">По дате</option>
         <option value="priority">По приоритету</option>

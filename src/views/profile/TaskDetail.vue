@@ -7,6 +7,7 @@
         <span class="priority" :class="'priority-' + task.priority.toLowerCase()">
           {{ getPriorityText(task.priority) }}
         </span>
+        <button @click="backToTasks" class="back-btn">← Назад к списку задач</button>
       </div>
 
       <div class="task-body">
@@ -60,7 +61,7 @@
                 :class="{ selected: selectedGroupId === group.id }"
                 @click="selectedGroupId = group.id"
             >
-              {{ group.name }} (ID: {{ group.id }})
+              {{ group.name }}
             </div>
             <div v-if="groups.length === 0" class="no-groups">
               У вас нет доступных групп
@@ -101,10 +102,10 @@
                 @click="selectedStudentId = student.id"
             >
               <div class="student-avatar">
-                {{ getInitials(student.name) }}
+                {{ getInitials(student.username) }}
               </div>
               <div class="student-info">
-                <h4>{{ student.name }}</h4>
+                <h4>{{ student.username }}</h4>
                 <p>{{ student.email }}</p>
               </div>
             </div>
@@ -228,16 +229,7 @@ export default {
 
       assignmentLoading.value = true;
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.post(
-            `http://host.docker.internal:8080/task/assign/${route.params.taskId}/group/${selectedGroupId.value}`,
-            {},
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
+        await api.assignTaskToGroup(route.params.taskId, selectedGroupId.value, {})
 
         alert('Задача успешно назначена группе');
         showGroupModal.value = false;
@@ -252,18 +244,16 @@ export default {
 
     const deleteTask = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.delete(`http://host.docker.internal:8080/task/${route.params.taskId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        await router.push('/profile/tasks');
+        await api.deleteTask(route.params.taskId)
+        await router.push('/profile/tasks').then(alert("Задача удалена"))
       } catch (error) {
         console.error('Ошибка при удалении задачи:', error);
       }
     };
 
+    const backToTasks = () => {
+      router.push('/profile/tasks')
+    }
 
     const showStudentModal = ref(false);
     const students = ref([]);
@@ -278,7 +268,7 @@ export default {
       studentsError.value = null;
       try {
         const token = localStorage.getItem('jwt-token');
-        const response = await api.getUsersByRole('STUDENT');
+        const response = await api.getMyUsers()
 
         // Проверяем структуру ответа
         if (Array.isArray(response.data)) {
@@ -321,17 +311,7 @@ export default {
 
       studentAssignmentLoading.value = true;
       try {
-        const token = localStorage.getItem('jwt-token');
-        await axios.post(
-            `http://host.docker.internal:8080/task/assign/${route.params.taskId}/${selectedStudentId.value}`,
-            {},
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-        );
-
+        await api.assignTaskToUser(route.params.taskId, selectedStudentId.value, {})
         alert('Задача успешно назначена студенту!');
         showStudentModal.value = false;
         await fetchTask(); // Обновляем данные задачи
@@ -375,7 +355,8 @@ export default {
       studentAssignmentLoading,
       assignToStudent,
       confirmStudentAssignment,
-      getInitials
+      getInitials,
+      backToTasks
     };
   }
 };
@@ -409,7 +390,15 @@ export default {
   margin-bottom: 20px;
   line-height: 1.6;
 }
-
+.back-btn {
+  background: #7fb3e0;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
 .task-info {
   background: #f8f9fa;
   padding: 15px;

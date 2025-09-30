@@ -16,6 +16,8 @@ api.interceptors.request.use(config => {
     return config
 })
 
+const NOTIFICATION_API = 'http://localhost:8082';
+
 export default {
 
     // Auth
@@ -94,6 +96,12 @@ export default {
     getGroupData(){
       return api.get('/user/my-group')
     },
+    assignTeacherToGroup(id, id2) {
+        return api.put(`/admin/${id}/teacher/${id2}`, {})
+    },
+    getTeacherName(teacherId) {
+        return api.get(`/user/about-user/${teacherId}`);
+    },
 
     // Users
     getUsers() {
@@ -111,6 +119,9 @@ export default {
     getUsersByRole(role) {
         return api.get(`/admin/users/by-role?role=${role}`)
     },
+    getMyUsers(){
+        return api.get('/group/my-students')
+    },
 
     // User info
     getUserInfo() {
@@ -120,4 +131,38 @@ export default {
         return api.get(`/task/student/${userId}`);
     },
 
+    getInfoAboutMe(){
+        return api.get('/admin/statistic');
+    },
+
+    getNotification: (params) => axios.get(`${NOTIFICATION_API}/notifications`, {
+        params: {
+            userId: params.userId,
+            limit: params?.limit || 50
+        },
+        headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
+    }),
+
+    getUnreadNotifications: () => axios.get(`${NOTIFICATION_API}/notifications/unread`, {
+        params: { userId: localStorage.getItem('userId') },
+        headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
+    }),
+
+    markAsReadNotification: (id) => axios.put(`${NOTIFICATION_API}/notifications/${id}/read`, {}, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
+    }),
+
+    markAllAsReadNotification: (id) => axios.put(`${NOTIFICATION_API}/notifications/read-all`, {}, {
+        params: { userId: id },
+        headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
+    }),
+
+    deleteNotification: (id) => axios.delete(`${NOTIFICATION_API}/notifications/${id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
+    }),
+
+    getUnreadCount: () => axios.get(`${NOTIFICATION_API}/notifications/unread-count`, {
+        params: { userId: localStorage.getItem('userId') },
+        headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
+    }),
 }

@@ -29,11 +29,8 @@
                 {{ getInitials(member.name) }}
               </div>
               <div class="member-info">
-                <h4>{{ member.name }}</h4>
+                <h4>{{ member.username }}</h4>
                 <p>{{ member.email }}</p>
-                <span class="role-badge" :class="member.role.toLowerCase()">
-                  {{ getRoleText(member.role) }}
-                </span>
               </div>
             </div>
           </div>

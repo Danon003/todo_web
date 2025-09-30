@@ -6,236 +6,168 @@
         <button
             @click="markAllAsRead"
             class="btn-mark-all"
-            :disabled="notifications.length === 0"
+            :disabled="notifications.length === 0 || unreadCount === 0 || !userInfo"
         >
           Отметить все как прочитанные
         </button>
         <button
             @click="fetchNotifications"
             class="btn-refresh"
+            :disabled="loading"
         >
           <span class="refresh-icon">↻</span>
         </button>
       </div>
     </div>
 
-    <div class="notification-filters">
-      <div class="filter-group">
-        <label>
-          <input
-              type="checkbox"
-              v-model="filters.unreadOnly"
-              @change="applyFilters"
-          >
-          Только непрочитанные
-        </label>
-      </div>
-
-      <div class="filter-group">
-        <select v-model="filters.type" @change="applyFilters" class="filter-select">
-          <option value="all">Все типы</option>
-          <option value="SYSTEM">Системные</option>
-          <option value="TASK">Задачи</option>
-          <option value="GROUP">Группы</option>
-          <option value="DEADLINE">Дедлайны</option>
-        </select>
-      </div>
-    </div>
-
-    <div v-if="loading" class="loading">
+    <div v-if="authLoading" class="loading">
       <div class="spinner"></div>
-      <p>Загрузка уведомлений...</p>
+      <p>Загрузка информации пользователя...</p>
     </div>
 
-    <div v-else-if="filteredNotifications.length === 0" class="empty-state">
-      <div class="empty-icon">📭</div>
-      <h3>Уведомлений нет</h3>
-      <p>Здесь будут появляться ваши уведомления</p>
+    <div v-else-if="!userInfo" class="empty-state">
+      <div class="empty-icon">🔒</div>
+      <h3>Требуется авторизация</h3>
+      <p>Пожалуйста, войдите в систему для просмотра уведомлений</p>
+      <button @click="fetchUserInfo" class="btn-login">Обновить</button>
     </div>
 
-    <div v-else class="notifications-list">
-      <div
-          v-for="notification in filteredNotifications"
-          :key="notification.id"
-          :class="['notification-item', { unread: !notification.read }]"
-          @click="markAsRead(notification)"
-      >
-        <div class="notification-icon">
-          <span v-if="notification.type === 'TASK'">📝</span>
-          <span v-else-if="notification.type === 'GROUP'">👥</span>
-          <span v-else-if="notification.type === 'DEADLINE'">⏰</span>
-          <span v-else>🔔</span>
+    <div v-else>
+      <div class="connection-status" >
+        <span v-if="unreadCount > 0">• Непрочитанных: {{ unreadCount }}</span>
+      </div>
+
+      <div class="notification-filters">
+        <div class="filter-group">
+          <label>
+            <input
+                type="checkbox"
+                v-model="filters.unreadOnly"
+                @change="applyFilters"
+            >
+            Только непрочитанные
+          </label>
         </div>
 
-        <div class="notification-content">
-          <h4>{{ notification.title }}</h4>
-          <p>{{ notification.message }}</p>
-          <div class="notification-meta">
-            <span class="notification-time">{{ formatTime(notification.createdAt) }}</span>
-            <span class="notification-type">{{ getTypeText(notification.type) }}</span>
+        <div class="filter-group">
+          <select v-model="filters.type" @change="applyFilters" class="filter-select">
+            <option value="all">Все типы</option>
+            <option value="SYSTEM">Системные</option>
+            <option value="TASK">Задачи</option>
+            <option value="GROUP">Группы</option>
+            <option value="DEADLINE">Дедлайны</option>
+            <option value="TEST">Тестовые</option>
+            <option value="REGISTER">Регистрация</option>
+
+          </select>
+        </div>
+      </div>
+
+      <div v-if="loading" class="loading">
+        <div class="spinner"></div>
+        <p>Загрузка уведомлений...</p>
+      </div>
+
+      <div v-else-if="filteredNotifications.length === 0" class="empty-state">
+        <div class="empty-icon">📭</div>
+        <h3>Уведомлений нет</h3>
+        <p>Здесь будут появляться ваши уведомления</p>
+      </div>
+
+      <div v-else class="notifications-list">
+        <div
+            v-for="notification in filteredNotifications"
+            :key="notification.id"
+            :class="['notification-item', { unread: !notification.read }]"
+            @click="markAsRead(notification)"
+        >
+          <div class="notification-icon">
+            <span v-if="notification.type === 'TASK'">📝</span>
+            <span v-else-if="notification.type === 'GROUP'">👥</span>
+            <span v-else-if="notification.type === 'TASK_OVERDUE'">🚨</span>
+            <span v-else-if="notification.type === 'TEST'">🧪</span>
+            <span v-else-if="notification.type === 'REGISTER'">👋</span>
+            <span v-else-if="notification.type === 'TASK_DEADLINE_2D'">⏰</span>
+            <span v-else-if="notification.type === 'TASK_DEADLINE_1D'">⏰</span>
+            <span v-else-if="notification.type === 'TASK_DEADLINE_12H'">⏰</span>
+            <span v-else-if="notification.type === 'CHANGE_ROLE'">⚙️</span>
+            <span v-else-if="notification.type === 'SYSTEM'">⚙️</span>
+
+            <span v-else>🔔</span>
+          </div>
+
+          <div class="notification-content">
+            <h4>{{ notification.title }}</h4>
+            <p>{{ notification.message }}</p>
+            <div class="notification-meta">
+              <span class="notification-time">{{ formatTime(notification.createdAt) }}</span>
+              <span class="notification-type">{{ getTypeText(notification.type) }}</span>
+              <span v-if="isRealTime(notification.createdAt)" class="realtime-badge">LIVE</span>
+            </div>
+          </div>
+
+          <div class="notification-actions">
+            <button
+                v-if="!notification.read"
+                @click.stop="markAsRead(notification)"
+                class="btn-mark-read"
+                title="Отметить как прочитанное"
+            >
+              ✓
+            </button>
+            <button
+                @click.stop="deleteNotification(notification.id)"
+                class="btn-delete"
+                title="Удалить"
+            >
+              ×
+            </button>
           </div>
         </div>
-
-        <div class="notification-actions">
-          <button
-              v-if="!notification.read"
-              @click.stop="markAsRead(notification)"
-              class="btn-mark-read"
-              title="Отметить как прочитанное"
-          >
-            ✓
-          </button>
-          <button
-              @click.stop="deleteNotification(notification.id)"
-              class="btn-delete"
-              title="Удалить"
-          >
-            ×
-          </button>
-        </div>
       </div>
-    </div>
 
-    <div v-if="filteredNotifications.length > 0" class="notification-pagination">
-      <button
-          :disabled="currentPage === 1"
-          @click="prevPage"
-          class="pagination-btn"
-      >
-        Назад
-      </button>
-      <span>Страница {{ currentPage }}</span>
-      <button
-          :disabled="filteredNotifications.length < pageSize"
-          @click="nextPage"
-          class="pagination-btn"
-      >
-        Вперед
-      </button>
+      <div v-if="filteredNotifications.length > 0 && !filters.unreadOnly" class="notification-pagination">
+        <button
+            @click="loadMore"
+            class="pagination-btn"
+            :disabled="loadingMore || !hasMoreNotifications"
+        >
+          {{ loadingMore ? 'Загрузка...' : 'Загрузить еще' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
-import axios from 'axios'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useToast } from 'vue-toastification'
+import { useRouter } from 'vue-router'
 import api from "@/api/index.js";
+import notificationWebSocket from '@/notifications-websocket'
 
 export default {
   name: 'Notifications',
   setup() {
     const toast = useToast()
+    const router = useRouter()
     const notifications = ref([])
-    const loading = ref(true)
-    const currentPage = ref(1)
-    const pageSize = ref(20)
+    const loading = ref(false)
+    const authLoading = ref(true)
+    const loadingMore = ref(false)
+    const hasMoreNotifications = ref(true)
+    const currentLimit = ref(50)
+    const userInfo = ref(null)
 
     const filters = ref({
       unreadOnly: false,
       type: 'all'
     })
 
-    const fetchNotifications = async () => {
-      try {
-        loading.value = true
-        const token = localStorage.getItem('jwt-token')
-        const response = await api.getNotification({
-          params: {
-            page: currentPage.value - 1,
-            size: pageSize.value
-          }
-        })
 
-        notifications.value = response.data.content || response.data
-      } catch (error) {
-        console.error('Ошибка при загрузке уведомлений:', error)
-        toast.error('Не удалось загрузить уведомления')
-
-        // Заглушка для демонстрации
-        notifications.value = [
-          {
-            id: 1,
-            title: 'Добро пожаловать!',
-            message: 'Вы успешно вошли в систему. Начните работу с вашими задачами.',
-            type: 'SYSTEM',
-            read: false,
-            createdAt: new Date().toISOString()
-          },
-          {
-            id: 2,
-            title: 'Новая задача',
-            message: 'Вам назначена новая задача: "Лабораторная работа по Vue.js"',
-            type: 'TASK',
-            read: false,
-            createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-          }
-        ]
-      } finally {
-        loading.value = false
-      }
-    }
-
-    const markAsRead = async (notification) => {
-      try {
-        const token = localStorage.getItem('jwt-token')
-        await api.markAsReadNotification(notification.id)
-
-        notification.read = true
-        toast.success('Уведомление отмечено как прочитанное')
-      } catch (error) {
-        console.error('Ошибка при отметке уведомления:', error)
-        notification.read = true // Локально меняем для UX
-      }
-    }
-
-    const markAllAsRead = async () => {
-      try {
-        const token = localStorage.getItem('jwt-token')
-        await api.markAllAsReadNotification()
-
-        notifications.value.forEach(n => n.read = true)
-        toast.success('Все уведомления отмечены как прочитанные')
-      } catch (error) {
-        console.error('Ошибка при отметке всех уведомлений:', error)
-        notifications.value.forEach(n => n.read = true)
-      }
-    }
-
-    const deleteNotification = async (id) => {
-      try {
-        const token = localStorage.getItem('jwt-token')
-        await api.deleteNotification(id)
-
-        notifications.value = notifications.value.filter(n => n.id !== id)
-        toast.success('Уведомление удалено')
-      } catch (error) {
-        console.error('Ошибка при удалении уведомления:', error)
-        toast.error('Не удалось удалить уведомление')
-      }
-    }
-
-    const formatTime = (dateString) => {
-      const date = new Date(dateString)
-      const now = new Date()
-      const diff = now - date
-
-      if (diff < 60000) return 'только что'
-      if (diff < 3600000) return `${Math.floor(diff / 60000)} мин назад`
-      if (diff < 86400000) return `${Math.floor(diff / 3600000)} ч назад`
-
-      return date.toLocaleDateString('ru-RU')
-    }
-
-    const getTypeText = (type) => {
-      const typeMap = {
-        'SYSTEM': 'Системное',
-        'TASK': 'Задача',
-        'GROUP': 'Группа',
-        'DEADLINE': 'Дедлайн'
-      }
-      return typeMap[type] || type
-    }
+    const unreadCount = computed(() => {
+      return notifications.value.filter(n => !n.read).length
+    })
 
     const filteredNotifications = computed(() => {
       return notifications.value.filter(notification => {
@@ -245,48 +177,264 @@ export default {
       })
     })
 
-    const applyFilters = () => {
-      currentPage.value = 1
-    }
+    // Получение информации о пользователе
+    const fetchUserInfo = async () => {
+      try {
+        authLoading.value = true
+        const response = await api.getUserInfo()
+        userInfo.value = response.data
+        console.log('User info loaded:', userInfo.value)
 
-    const nextPage = () => {
-      currentPage.value++
-      fetchNotifications()
-    }
-
-    const prevPage = () => {
-      if (currentPage.value > 1) {
-        currentPage.value--
-        fetchNotifications()
+        // После получения userInfo загружаем уведомления и настраиваем WebSocket
+        await fetchNotifications()
+        setupWebSocket()
+      } catch (error) {
+        console.error('Ошибка при загрузке информации пользователя:', error)
+        toast.error('Ошибка авторизации')
+        userInfo.value = null
+      } finally {
+        authLoading.value = false
       }
     }
 
+    const setupWebSocket = () => {
+      if (!userInfo.value || !userInfo.value.id) {
+        console.warn('User ID not available for WebSocket connection')
+        return
+      }
+
+
+      notificationWebSocket.connect(userInfo.value.id,
+          (newNotification) => {
+            handleNewNotification(newNotification)
+          },
+      )
+    }
+
+    const handleNewNotification = (newNotification) => {
+      // ❗ Пропускаем уведомления без ID
+      if (!newNotification.id) {
+        console.warn('Пропущено уведомление без ID:', newNotification);
+        return;
+      }
+
+      // ❗ Устанавливаем read по умолчанию
+      if (newNotification.read === undefined) {
+        newNotification.read = false;
+      }
+
+      // ❗ Исправляем createdAt, если это массив или число
+      if (Array.isArray(newNotification.createdAt)) {
+        // Если массив — формируем строку вручную
+        const [year, month, day, hour, minute, second, nano] = newNotification.createdAt;
+        newNotification.createdAt = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}.${String(nano).slice(0, 3)}Z`;
+      } else if (typeof newNotification.createdAt === 'number') {
+        newNotification.createdAt = new Date(newNotification.createdAt * 1000).toISOString();
+      }
+
+      const existingIndex = notifications.value.findIndex(n => n.id === newNotification.id);
+
+      if (existingIndex === -1) {
+        notifications.value.unshift(newNotification);
+
+        if (!document.hidden) {
+          toast.info(`Новое уведомление: ${newNotification.title}`, {
+            timeout: 4000,
+            onClick: () => {
+              markAsRead(newNotification)
+            }
+          })
+        }
+      } else {
+        notifications.value[existingIndex] = newNotification;
+      }
+    }
+
+    const fetchNotifications = async () => {
+      if (!userInfo.value) return
+
+      try {
+        loading.value = true
+        const response = await api.getNotification({
+          limit: currentLimit.value,
+          userId: userInfo.value.id
+        })
+        notifications.value = response.data || []
+        hasMoreNotifications.value = (response.data || []).length === currentLimit.value
+      } catch (error) {
+        console.error('Ошибка при загрузке уведомлений:', error)
+        toast.error('Ошибка загрузки уведомлений')
+        notifications.value = getDemoNotifications()
+      } finally {
+        loading.value = false
+      }
+    }
+
+    const loadMore = async () => {
+      if (!userInfo.value) return
+
+      try {
+        loadingMore.value = true
+        const newLimit = currentLimit.value + 30
+        const response = await api.getNotification({
+          limit: newLimit,
+          userId: userInfo.value.id
+        })
+
+        if (response.data && response.data.length > notifications.value.length) {
+          notifications.value = response.data
+          currentLimit.value = newLimit
+          hasMoreNotifications.value = response.data.length === newLimit
+        } else {
+          hasMoreNotifications.value = false
+        }
+      } catch (error) {
+        console.error('Ошибка при загрузке дополнительных уведомлений:', error)
+        toast.error('Ошибка загрузки уведомлений')
+      } finally {
+        loadingMore.value = false
+      }
+    }
+
+    const markAsRead = async (notification) => {
+      if (!userInfo.value) return
+
+      try {
+        if (!notification.read) {
+          await api.markAsReadNotification(notification.id)
+          notification.read = true
+        }
+      } catch (error) {
+        console.error('Ошибка при отметке уведомления как прочитанного:', error)
+        notification.read = true
+        toast.warning('Уведомление отмечено как прочитанное (локально)')
+      }
+    }
+
+    const markAllAsRead = async () => {
+      if (!userInfo.value) return
+
+      try {
+        await api.markAllAsReadNotification(userInfo.value.id)
+        notifications.value.forEach(notification => {
+          notification.read = true
+        })
+        toast.success('Все уведомления отмечены как прочитанные')
+      } catch (error) {
+        console.error('Ошибка при отметке всех уведомлений:', error)
+        notifications.value.forEach(notification => {
+          notification.read = true
+        })
+        toast.success('Все уведомления отмечены как прочитанные (локально)')
+      }
+    }
+
+    const deleteNotification = async (id) => {
+      try {
+        await api.deleteNotification(id)
+        notifications.value = notifications.value.filter(n => n.id !== id)
+        toast.success('Уведомление удалено')
+      } catch (error) {
+        console.error('Ошибка при удалении уведомления:', error)
+        notifications.value = notifications.value.filter(n => n.id !== id)
+        toast.success('Уведомление удалено (локально)')
+      }
+    }
+
+
+    const formatTime = (dateString) => {
+      if (!dateString) return 'недавно';
+
+      // Обрезаем наносекунды до миллисекунд
+      const trimmed = typeof dateString === 'string'
+          ? dateString.replace(/(\.\d{3})\d+/, '$1')
+          : dateString;
+
+      const date = new Date(trimmed);
+      if (isNaN(date.getTime())) {
+        console.warn('Невалидная дата:', dateString);
+        return 'недавно';
+      }
+
+      const now = new Date();
+      const diff = now - date;
+
+      if (diff < 60000) return 'только что';
+      if (diff < 3600000) return `${Math.floor(diff / 60000)} мин назад`;
+      if (diff < 86400000) return `${Math.floor(diff / 3600000)} ч назад`;
+
+      return date.toLocaleDateString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    const isRealTime = (dateString) => {
+      if (!dateString) return false
+      const date = new Date(dateString)
+      const now = new Date()
+      return (now - date) < 30000
+    }
+
+    const getTypeText = (type) => {
+      const typeMap = {
+        'SYSTEM': 'Системное',
+        'TASK': 'Задача',
+        'GROUP': 'Группа',
+        'TASK_OVERDUE': 'Дедлайн',
+        'TEST': 'Тестовое',
+        'REGISTER': 'Регистрация',
+        'TASK_DEADLINE_2D': 'Дедлайн',
+        'TASK_DEADLINE_1D': 'Дедлайн',
+        'TASK_DEADLINE_12H': 'Дедлайн',
+        'CHANGE_ROLE': 'Дедлайн',
+        'TEACHER_REMOVED': 'Наставничество',
+        'TEACHER_ASSIGN': 'Наставничество',
+      }
+      return typeMap[type] || type
+    }
+    const applyFilters = () => {
+      // Фильтрация происходит автоматически через computed
+    }
+
     onMounted(() => {
-      fetchNotifications()
+      fetchUserInfo()
+    })
+
+    onUnmounted(() => {
+      notificationWebSocket.disconnect()
     })
 
     return {
       notifications,
       loading,
+      authLoading,
+      loadingMore,
       filters,
       filteredNotifications,
-      currentPage,
-      pageSize,
+      unreadCount,
+      hasMoreNotifications,
+      userInfo,
+      fetchUserInfo,
       fetchNotifications,
+      loadMore,
       markAsRead,
       markAllAsRead,
       deleteNotification,
       formatTime,
+      isRealTime,
       getTypeText,
-      applyFilters,
-      nextPage,
-      prevPage
+      applyFilters
     }
   }
 }
 </script>
 
 <style scoped>
+/* Стили остаются без изменений из предыдущего варианта */
 .notification-container {
   max-width: 800px;
   margin: 0 auto;
@@ -378,6 +526,11 @@ export default {
 
 .btn-refresh:hover {
   background: #e9ecef;
+}
+
+.btn-refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-test {
@@ -587,31 +740,31 @@ export default {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 16px;
   margin-top: 24px;
   padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
 }
 
 .pagination-btn {
-  padding: 8px 16px;
-  border: 1px solid #ced4da;
+  padding: 12px 24px;
+  border: 1px solid #4a90e2;
   background: white;
-  border-radius: 4px;
+  color: #4a90e2;
+  border-radius: 6px;
   cursor: pointer;
+  font-weight: 500;
   transition: all 0.2s ease;
 }
 
 .pagination-btn:hover:not(:disabled) {
   background: #4a90e2;
   color: white;
-  border-color: #4a90e2;
 }
 
 .pagination-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  border-color: #ccc;
+  color: #ccc;
 }
 
 @media (max-width: 768px) {

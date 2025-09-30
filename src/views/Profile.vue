@@ -52,6 +52,7 @@ export default {
       return roleMap[role] || role
     }
 
+
     const logout = () => {
       localStorage.removeItem('jwt-token')
       localStorage.removeItem('user')
