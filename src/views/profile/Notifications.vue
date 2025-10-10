@@ -49,18 +49,6 @@
           </label>
         </div>
 
-        <div class="filter-group">
-          <select v-model="filters.type" @change="applyFilters" class="filter-select">
-            <option value="all">Все типы</option>
-            <option value="SYSTEM">Системные</option>
-            <option value="TASK">Задачи</option>
-            <option value="GROUP">Группы</option>
-            <option value="DEADLINE">Дедлайны</option>
-            <option value="TEST">Тестовые</option>
-            <option value="REGISTER">Регистрация</option>
-
-          </select>
-        </div>
       </div>
 
       <div v-if="loading" class="loading">
@@ -390,7 +378,7 @@ export default {
         'TASK_DEADLINE_2D': 'Дедлайн',
         'TASK_DEADLINE_1D': 'Дедлайн',
         'TASK_DEADLINE_12H': 'Дедлайн',
-        'CHANGE_ROLE': 'Дедлайн',
+        'CHANGE_ROLE': 'Новая роль',
         'TEACHER_REMOVED': 'Наставничество',
         'TEACHER_ASSIGN': 'Наставничество',
       }

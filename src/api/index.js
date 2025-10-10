@@ -63,6 +63,9 @@ export default {
             }
         })
     },
+    getUsersWithTask(taskId) {
+        return api.get(`/task/getListTask/${taskId}`)
+    },
 
     // Groups
     getGroups() {
@@ -131,9 +134,10 @@ export default {
         return api.get(`/task/student/${userId}`);
     },
 
-    getInfoAboutMe(){
+    getStats(){
         return api.get('/admin/statistic');
     },
+
 
     getNotification: (params) => axios.get(`${NOTIFICATION_API}/notifications`, {
         params: {
@@ -165,4 +169,5 @@ export default {
         params: { userId: localStorage.getItem('userId') },
         headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
     }),
+
 }

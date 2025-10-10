@@ -1,5 +1,23 @@
 <template>
   <div class="users-container">
+    <!-- Тосты для уведомлений -->
+    <div v-if="toast.show" :class="['toast', `toast-${toast.type}`]">
+      <span>{{ toast.message }}</span>
+      <button @click="hideToast" class="toast-close">×</button>
+    </div>
+
+    <!-- Модалка подтверждения удаления пользователя -->
+    <div v-if="showDeleteConfirm" class="modal">
+      <div class="modal-content">
+        <h3>Подтверждение удаления</h3>
+        <p>Вы уверены, что хотите удалить пользователя "{{ userToDelete?.username }}"?</p>
+        <div class="modal-actions">
+          <button @click="confirmDeleteUser" class="delete-btn">Удалить</button>
+          <button @click="cancelDeleteUser" class="cancel-btn">Отмена</button>
+        </div>
+      </div>
+    </div>
+
     <div class="users-header">
       <h2>Управление пользователями</h2>
       <button @click="showCreateModal = true" class="create-btn">
@@ -19,7 +37,7 @@
     <div class="users-list">
       <div v-for="user in filteredUsers" :key="user.id" class="user-card">
         <div class="user-info">
-          <h3>{{ user.name }}</h3>
+          <h3>{{ user.username }}</h3>
           <p>{{ user.email }}</p>
           <span class="role-badge" :class="user.role.toLowerCase()">
             {{ getRoleText(user.role) }}
@@ -31,7 +49,7 @@
             <option value="TEACHER">Преподаватель</option>
             <option value="ADMIN">Администратор</option>
           </select>
-          <button @click="deleteUser(user.id)" class="delete-btn">Удалить</button>
+          <button @click="openDeleteConfirm(user)" class="delete-btn">Удалить</button>
         </div>
       </div>
     </div>
@@ -77,6 +95,32 @@ export default {
     const users = ref([]);
     const filterRole = ref('all');
     const showCreateModal = ref(false);
+    const showDeleteConfirm = ref(false);
+    const userToDelete = ref(null);
+
+    // Переменные для уведомлений
+    const toast = ref({
+      show: false,
+      message: '',
+      type: 'success'
+    });
+
+    const showToast = (message, type = 'success') => {
+      toast.value = {
+        show: true,
+        message,
+        type
+      };
+
+      setTimeout(() => {
+        hideToast();
+      }, 4000);
+    };
+
+    const hideToast = () => {
+      toast.value.show = false;
+    };
+
     const newUser = ref({
       name: '',
       email: '',
@@ -103,7 +147,7 @@ export default {
 
       } catch (error) {
         console.error('Ошибка при получении пользователей:', error);
-        alert('Ошибка при загрузке пользователей: ' + (error.response?.data?.message || error.message));
+        showToast('Ошибка при загрузке пользователей', 'error');
       }
     };
 
@@ -130,7 +174,7 @@ export default {
         await api.createUser(newUser.value);
 
         showCreateModal.value = false;
-
+        showToast('Пользователь успешно создан');
         await fetchUsers();
 
         newUser.value = {
@@ -143,16 +187,15 @@ export default {
 
       } catch (error) {
         console.error('Ошибка при создании пользователя:', error);
-        alert('Ошибка при создании пользователя: ' + (error.response?.data?.message || error.message));
+        showToast('Ошибка при создании пользователя', 'error');
       }
     };
 
     const updateUserRole = async (user) => {
       try {
         await api.updateUserRole(user.id, user.newRole);
-
+        showToast('Роль пользователя успешно обновлена');
         await fetchUsers();
-
       } catch (error) {
         console.error('Ошибка при обновлении роли:', error);
 
@@ -161,22 +204,33 @@ export default {
           user.newRole = originalUser.role;
         }
 
-        alert('Ошибка при обновлении роли: ' + (error.response?.data?.message || error.message));
+        showToast('Ошибка при обновлении роли', 'error');
       }
     };
 
-    const deleteUser = async (userId) => {
-      if (!confirm('Вы уверены, что хотите удалить этого пользователя?')) return;
+    const openDeleteConfirm = (user) => {
+      userToDelete.value = user;
+      showDeleteConfirm.value = true;
+    };
+
+    const confirmDeleteUser = async () => {
+      if (!userToDelete.value) return;
 
       try {
-        await api.deleteUser(userId);
-
+        await api.deleteUser(userToDelete.value.id);
+        showToast('Пользователь успешно удален');
         await fetchUsers();
-
       } catch (error) {
         console.error('Ошибка при удалении пользователя:', error);
-        alert('Ошибка при удалении пользователя: ' + (error.response?.data?.message || error.message));
+        showToast('Ошибка при удалении пользователя', 'error');
+      } finally {
+        cancelDeleteUser();
       }
+    };
+
+    const cancelDeleteUser = () => {
+      showDeleteConfirm.value = false;
+      userToDelete.value = null;
     };
 
     return {
@@ -184,18 +238,150 @@ export default {
       filteredUsers,
       filterRole,
       showCreateModal,
+      showDeleteConfirm,
+      userToDelete,
       newUser,
       getRoleText,
       createUser,
       updateUserRole,
-      deleteUser,
-      fetchUsers
+      openDeleteConfirm,
+      confirmDeleteUser,
+      cancelDeleteUser,
+      fetchUsers,
+      toast,
+      hideToast
     };
   }
 };
 </script>
 
 <style scoped>
+/* Стили для тостов */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 15px 20px;
+  border-radius: 8px;
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 300px;
+  max-width: 400px;
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out;
+}
+
+.toast-success {
+  background: #28a745;
+  border-left: 4px solid #1e7e34;
+}
+
+.toast-error {
+  background: #dc3545;
+  border-left: 4px solid #c82333;
+}
+
+.toast-warning {
+  background: #ffc107;
+  color: #856404;
+  border-left: 4px solid #e0a800;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5em;
+  cursor: pointer;
+  margin-left: 15px;
+  opacity: 0.8;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Стили для модалки подтверждения */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 25px;
+  border-radius: 8px;
+  width: 400px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.modal-content h3 {
+  margin: 0 0 15px 0;
+  color: #dc3545;
+}
+
+.modal-content p {
+  margin: 0 0 20px 0;
+  color: #666;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.delete-btn {
+  background-color: #dc3545;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.delete-btn:hover {
+  background-color: #c82333;
+}
+
+.cancel-btn {
+  background-color: #6c757d;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  background-color: #5a6268;
+}
+
+/* Остальные стили без изменений */
 .users-container {
   padding: 20px;
 }

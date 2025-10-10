@@ -1,5 +1,9 @@
 <template>
   <div class="groups-container">
+    <div v-if="toast.show" :class="['toast', `toast-${toast.type}`]">
+      <span>{{ toast.message }}</span>
+      <button @click="hideToast" class="toast-close">×</button>
+    </div>
     <div class="groups-header">
       <h2>{{ user.role === 'ROLE_ADMIN' ? 'Управление группами' : 'Мои группы' }}</h2>
       <button v-if="user.role === 'ROLE_ADMIN'" @click="showCreateModal = true" class="create-btn">
@@ -14,8 +18,8 @@
         <div class="group-meta">
           <span>Студентов: {{ studentCount(group.id) }}</span>
           <span v-if="getTeacherName(group.teacherId)" class="teacher-info">
-    Ответственный: {{ getTeacherName(group.teacherId) }}
-  </span>
+          Ответственный: {{ getTeacherName(group.teacherId) }}
+          </span>
           <span v-else class="no-teacher">
     Ответственный не назначен
   </span>
@@ -32,6 +36,17 @@
                   class="action-btn delete">
             Удалить
           </button>
+        </div>
+      </div>
+    </div>
+    <!-- Модалка подтверждения удаления -->
+    <div v-if="showDeleteConfirm" class="modal">
+      <div class="modal-content">
+        <h3>Подтверждение удаления</h3>
+        <p>Вы уверены, что хотите удалить группу "{{ groupToDelete?.name }}"?</p>
+        <div class="modal-actions">
+          <button @click="confirmDelete" class="delete-btn">Удалить</button>
+          <button @click="cancelDelete" class="cancel-btn">Отмена</button>
         </div>
       </div>
     </div>
@@ -108,7 +123,13 @@ export default {
     const showAssignTeacherModal = ref(false);
     const selectedGroup = ref(null);
     const selectedTeacher = ref(null);
-
+    const showDeleteConfirm = ref(false);
+    const groupToDelete = ref(null);
+    const toast = ref({
+      show: false,
+      message: '',
+      type: 'success' // success, error, warning
+    });
     const newGroup = ref({
       name: '',
       description: ''
@@ -116,7 +137,27 @@ export default {
 
     const user = JSON.parse(localStorage.getItem('user') || {});
 
-    // Получаем студентов для конкретной группы
+    const showToast = (message, type = 'success') => {
+      toast.value = {
+        show: true,
+        message,
+        type
+      };
+
+      // Автоматически скрыть через 4 секунды
+      setTimeout(() => {
+        hideToast();
+      }, 4000);
+    };
+
+    const hideToast = () => {
+      toast.value.show = false;
+    };
+
+    onMounted(() => {
+       fetchTeachers(); // Сначала загружаем преподавателей
+       fetchGroups();
+    });
     const fetchStudentsForGroup = async (groupId) => {
       try {
         const response = await api.getGroupStudents(groupId);
@@ -142,6 +183,7 @@ export default {
         });
       } catch (error) {
         console.error('Ошибка при получении групп:', error);
+        showToast('Не удалось загрузить список групп', 'error');
       }
     };
 
@@ -149,19 +191,15 @@ export default {
       try {
         const response = await api.getUsersByRole('TEACHER');
         teachers.value = response.data;
-        console.log('Loaded teachers:', teachers.value); // Добавь эту строку
       } catch (error) {
         console.error('Ошибка при получении преподавателей:', error);
+        showToast('Не удалось загрузить список преподавателей', 'error');
       }
     };
 
     const getTeacherName = (teacherId) => {
       if (!teacherId) return null;
-
-      // Используем teachers из модального окна (они уже загружены там)
       const teacher = teachers.value.find(t => t.id === teacherId);
-
-      // Если не нашли, возвращаем заглушку с ID для отладки
       return teacher ? teacher.username : `Преподаватель #${teacherId}`;
     };
 
@@ -181,6 +219,25 @@ export default {
       showAssignTeacherModal.value = true;
     };
 
+    const confirmDelete = async () => {
+      if (!groupToDelete.value) return;
+
+      try {
+        await api.deleteGroup(groupToDelete.value.id);
+        await fetchGroups();
+        showToast('Группа успешно удалена');
+      } catch (error) {
+        console.error('Ошибка при удалении группы:', error);
+        showToast('Не удалось удалить группу', 'error');
+      } finally {
+        cancelDelete();
+      }
+    };
+
+    const cancelDelete = () => {
+      showDeleteConfirm.value = false;
+      groupToDelete.value = null;
+    };
     const selectTeacher = (teacher) => {
       selectedTeacher.value = teacher;
     };
@@ -198,10 +255,10 @@ export default {
         }
 
         showAssignTeacherModal.value = false;
-        alert('Преподаватель успешно назначен!');
+        showToast('Преподаватель успешно назначен!');
       } catch (error) {
         console.error('Ошибка при назначении преподавателя:', error);
-        alert('Произошла ошибка при назначении преподавателя');
+        showToast('Произошла ошибка при назначении преподавателя', 'error');
       }
     };
 
@@ -211,8 +268,8 @@ export default {
     };
 
     onMounted(() => {
-       fetchTeachers(); // Сначала загружаем преподавателей
-       fetchGroups();
+      fetchTeachers();
+      fetchGroups();
     });
 
     const viewGroup = (groupId) => {
@@ -233,25 +290,22 @@ export default {
           name: '',
           description: ''
         };
+        showToast('Группа успешно создана');
       } catch (error) {
         console.error('Ошибка при создании группы:', error);
         if (error.response?.status === 403) {
-          alert('У вас нет прав для создания групп');
+          showToast('У вас нет прав для создания групп', 'error');
         } else {
-          alert('Произошла ошибка при создании группы');
+          showToast('Произошла ошибка при создании группы', 'error');
         }
       }
     };
 
     const deleteGroup = async (groupId) => {
-      if (!confirm('Вы уверены, что хотите удалить эту группу?')) return;
-
-      try {
-        await api.deleteGroup(groupId);
-        await fetchGroups();
-      } catch (error) {
-        console.error('Ошибка при удалении группы:', error);
-      }
+      // Находим группу для показа названия в модалке
+      const group = groups.value.find(g => g.id === groupId);
+      groupToDelete.value = group;
+      showDeleteConfirm.value = true;
     };
 
     return {
@@ -270,7 +324,13 @@ export default {
       openAssignTeacherModal,
       selectTeacher,
       getTeacherName,
-      assignTeacher
+      assignTeacher,
+      toast,
+      hideToast,
+      showDeleteConfirm,
+      groupToDelete,
+      confirmDelete,
+      cancelDelete,
     };
   }
 };
@@ -310,13 +370,7 @@ export default {
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.group-meta {
-  display: flex;
-  justify-content: space-between;
-  margin: 10px 0;
-  font-size: 0.9em;
-  color: #666;
-}
+
 
 .group-actions {
   display: flex;
@@ -543,11 +597,6 @@ export default {
   font-weight: bold;
 }
 
-.modal-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-}
 
 .submit-btn:disabled {
   background-color: #cccccc;
@@ -557,9 +606,342 @@ export default {
   color: #dc3545;
   font-style: italic;
 }
+.assign {
+  background-color: #11ab42;
+  color: white;
+}
+.teacher-info {
+  color: #28a745;
+  font-weight: 500;
+}
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 15px 20px;
+  border-radius: 8px;
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 300px;
+  max-width: 400px;
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out;
+}
+
+.toast-success {
+  background: #28a745;
+  border-left: 4px solid #1e7e34;
+}
+
+.toast-error {
+  background: #dc3545;
+  border-left: 4px solid #c82333;
+}
+
+.toast-warning {
+  background: #ffc107;
+  color: #856404;
+  border-left: 4px solid #e0a800;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5em;
+  cursor: pointer;
+  margin-left: 15px;
+  opacity: 0.8;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Остальные стили без изменений */
+.groups-container {
+  padding: 20px;
+}
+
+.groups-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.create-btn {
+  background-color: #4CAF50;
+  color: white;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.groups-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.group-card {
+  background: white;
+  border-radius: 8px;
+  padding: 15px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.group-meta {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  margin: 10px 0;
+  font-size: 0.9em;
+  color: #666;
+}
+
+.group-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.action-btn {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.view {
+  background-color: #17A2B8;
+  color: white;
+}
+
+.delete {
+  background-color: #DC3545;
+  color: white;
+}
+
+.close {
+  float: right;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.form-group textarea {
+  min-height: 100px;
+}
+
+.submit-btn {
+  background-color: #4CAF50;
+  color: white;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.modal-subtitle {
+  margin-bottom: 20px;
+  font-weight: bold;
+  color: #333;
+}
+
+.teachers-list {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+}
+
+.teacher-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.teacher-card:hover {
+  background-color: #f5f5f5;
+}
+
+.teacher-card.selected {
+  border-color: #4CAF50;
+  background-color: #f0fff0;
+}
+
+.teacher-info h4 {
+  margin: 0 0 5px 0;
+  color: #333;
+}
+
+.teacher-info p {
+  margin: 0 0 5px 0;
+  color: #666;
+  font-size: 0.9em;
+}
+
+.groups-count {
+  font-size: 0.8em;
+  color: #888;
+}
+
+.teacher-check {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #ddd;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.teacher-card.selected .teacher-check {
+  border-color: #4CAF50;
+  background-color: #4CAF50;
+}
+
+.checkmark {
+  color: white;
+  font-weight: bold;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.cancel-btn {
+  background-color: #6c757d;
+  color: white;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.submit-btn:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.teacher-info {
+  flex: 1;
+}
+
+.no-teacher {
+  color: #dc3545;
+  font-style: italic;
+}
+
+.assign {
+  background-color: #11ab42;
+  color: white;
+}
 
 .teacher-info {
   color: #28a745;
   font-weight: 500;
 }
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  width: 500px;
+  max-width: 90%;
+}
+
+.modal-content h3 {
+  margin: 0 0 15px 0;
+  color: #dc3545;
+}
+
+.modal-content p {
+  margin: 0 0 20px 0;
+  color: #666;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.delete-btn {
+  background-color: #dc3545;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.delete-btn:hover {
+  background-color: #c82333;
+}
+
+.cancel-btn {
+  background-color: #6c757d;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  background-color: #5a6268;
+}
+
 </style>

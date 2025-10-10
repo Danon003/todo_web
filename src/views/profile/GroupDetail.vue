@@ -1,5 +1,22 @@
 <template>
   <div class="group-detail">
+    <div v-if="toast.show" :class="['toast', `toast-${toast.type}`]">
+      <span>{{ toast.message }}</span>
+      <button @click="hideToast" class="toast-close">×</button>
+    </div>
+
+    <!-- Модалка подтверждения удаления студента -->
+    <div v-if="showDeleteStudentConfirm" class="modal">
+      <div class="modal-content">
+        <h3>Подтверждение удаления</h3>
+        <p>Вы уверены, что хотите удалить студента "{{ studentToDelete?.username }}" из группы?</p>
+        <div class="modal-actions">
+          <button @click="confirmRemoveStudent" class="delete-btn">Удалить</button>
+          <button @click="cancelRemoveStudent" class="cancel-btn">Отмена</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="loading" class="loading">Загрузка...</div>
 
     <div v-else-if="group" class="group-content">
@@ -13,17 +30,16 @@
         <button :class="{ active: activeTab === 'students' }" @click="activeTab = 'students'">
           Студенты
         </button>
-
       </div>
 
       <!-- Вкладка: Студенты -->
       <div v-if="activeTab === 'students'" class="students-tab">
-        <button @click="backToGroups" class="back-btn">← Назад к списку групп</button>
+      <div class="button-back">  <button @click="backToGroups" class="back-btn">← Назад к списку групп</button></div>
 
         <div class="students-list">
           <div v-for="student in students" :key="student.id" class="student-card">
             <div class="student-info">
-              <h4>{{ student.name }}</h4>
+              <h4>{{ student.username }}</h4>
               <p>{{ student.email }}</p>
             </div>
 
@@ -36,7 +52,7 @@
             </button>
             <button
                 v-if="user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER'"
-                @click="removeStudent(student.id)"
+                @click="openRemoveStudentConfirm(student)"
                 class="remove-btn"
             >
               Удалить
@@ -45,18 +61,49 @@
         </div>
 
         <div v-if="user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER'" class="add-student">
-          <select v-model="selectedStudent" class="student-select">
-            <option value="" disabled>Выберите студента</option>
-            <option v-for="student in availableStudents" :key="student.id" :value="student.id">
-              {{ student.name }} ({{ student.email }})
-            </option>
-          </select>
-          <button @click="addStudent" class="add-btn">Добавить</button>
+          <div class="student-select-container">
+            <select
+                v-model="selectedStudent"
+                class="student-select"
+                :class="{ 'already-in-group': isSelectedStudentInGroup }"
+            >
+              <option value="" disabled>Выберите студента</option>
+              <option
+                  v-for="student in filteredAvailableStudents"
+                  :key="student.id"
+                  :value="student.id"
+                  :disabled="isStudentInGroup(student.id)"
+                  :class="{ 'disabled-option': isStudentInGroup(student.id) }"
+              >
+                {{ student.username }}
+                <span v-if="isStudentInGroup(student.id)" class="already-in-group-text">
+                (уже в группе)
+              </span>
+              </option>
+            </select>
+
+            <div class="student-select-info">
+            <span v-if="isSelectedStudentInGroup" class="warning-text">
+              ⚠️ Этот студент уже в группе
+            </span>
+              <span v-else-if="selectedStudent" class="success-text">
+              ✓ Можно добавить
+            </span>
+            </div>
+          </div>
+
+          <button
+              @click="addStudent"
+              class="add-btn"
+              :disabled="!selectedStudent || isSelectedStudentInGroup"
+          >
+            Добавить
+          </button>
         </div>
       </div>
 
       <!-- Вкладка: Задачи студента -->
-      <div v-else-if="activeTab === 'student-tasks'" class="tasks-tab">
+      <div v-else-if="activeTab === 'student-tasks'">
         <div class="student-header">
           <h3>Задачи студента: {{ currentStudent?.username }}</h3>
           <button @click="backToStudents" class="back-btn">← Назад к списку студентов</button>
@@ -94,7 +141,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue';
+import {ref, onMounted, computed} from 'vue';
 import { useRoute } from 'vue-router';
 import api from "@/api/index.js";
 import router from "@/router/index.js";
@@ -111,37 +158,97 @@ export default {
     const loading = ref(true);
     const user = JSON.parse(localStorage.getItem('user') || {});
 
-    // --- Новые переменные ---
-    const currentStudent = ref(null);        // текущий выбранный студент
-    const studentTasks = ref([]);            // задачи студента
-    const loadingTasks = ref(false);         // индикатор загрузки задач
+    const toast = ref({
+      show: false,
+      message: '',
+      type: 'success'
+    });
+
+    // Переменные для подтверждения удаления
+    const showDeleteStudentConfirm = ref(false);
+    const studentToDelete = ref(null);
+
+    const currentStudent = ref(null);
+    const studentTasks = ref([]);
+    const loadingTasks = ref(false);
+
+    const showToast = (message, type = 'success') => {
+      toast.value = {
+        show: true,
+        message,
+        type
+      };
+
+      setTimeout(() => {
+        hideToast();
+      }, 4000);
+    };
+
+    const hideToast = () => {
+      toast.value.show = false;
+    };
+    const filteredAvailableStudents = computed(() => {
+      return availableStudents.value.filter(student =>
+          !students.value.some(groupStudent => groupStudent.id === student.id)
+      );
+    });
+
+    const isStudentInGroup = (studentId) => {
+      return students.value.some(student => student.id === studentId);
+    };
+
+    const isSelectedStudentInGroup = computed(() => {
+      if (!selectedStudent.value) return false;
+      return isStudentInGroup(selectedStudent.value);
+    });
+    // Методы для подтверждения удаления студента
+    const openRemoveStudentConfirm = (student) => {
+      studentToDelete.value = student;
+      showDeleteStudentConfirm.value = true;
+    };
+
+    const confirmRemoveStudent = async () => {
+      if (!studentToDelete.value) return;
+
+      try {
+        await api.removeStudentFromGroup(route.params.groupId, studentToDelete.value.id);
+        await fetchGroupData();
+        showToast('Студент успешно удален из группы');
+      } catch (error) {
+        console.error('Ошибка при удалении студента:', error);
+        showToast('Не удалось удалить студента', 'error');
+      } finally {
+        cancelRemoveStudent();
+      }
+    };
+
+    const cancelRemoveStudent = () => {
+      showDeleteStudentConfirm.value = false;
+      studentToDelete.value = null;
+    };
 
     // --- Получение данных группы ---
     const fetchGroupData = async () => {
       try {
-        // Информация о группе
         const groupResponse = await api.getGroupInfo(route.params.groupId);
         group.value = groupResponse.data;
 
-        // Студенты группы
         const studentsResponse = await api.getGroupStudents(route.params.groupId);
         students.value = studentsResponse.data;
 
-        // Доступные студенты (для добавления)
         if (user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER') {
           const availableResponse = await api.getUsersByRole('STUDENT');
           availableStudents.value = availableResponse.data;
         }
 
-        // Задачи группы (если нужно)
         try {
           const tasksResponse = await api.getGroupTasks(route.params.groupId);
-          // groupTasks.value = tasksResponse.data; // если используешь
         } catch (error) {
           console.log('Не удалось получить задачи группы:', error);
         }
       } catch (error) {
         console.error('Ошибка при получении данных группы:', error);
+        showToast('Не удалось загрузить данные группы', 'error');
       } finally {
         loading.value = false;
       }
@@ -149,7 +256,6 @@ export default {
 
     onMounted(fetchGroupData);
 
-    // --- Новый метод: просмотр задач студента ---
     const checkStudentTask = async (studentId) => {
       loadingTasks.value = true;
       try {
@@ -165,13 +271,11 @@ export default {
         activeTab.value = 'student-tasks';
       } catch (error) {
         console.error('Ошибка при загрузке задач студента:', error);
-        alert('Не удалось загрузить задачи студента.');
+        showToast('Не удалось загрузить задачи студента', 'error');
       } finally {
         loadingTasks.value = false;
       }
     };
-
-    // --- Возврат к списку студентов ---
     const backToStudents = () => {
       activeTab.value = 'students';
       currentStudent.value = null;
@@ -182,7 +286,6 @@ export default {
       router.push('/profile/groups');
     }
 
-    // --- Форматирование даты ---
     const formatDate = (dateString) => {
       return new Date(dateString).toLocaleDateString();
     };
@@ -197,31 +300,24 @@ export default {
       return statusMap[status] || status;
     };
 
-    // --- Управление студентами ---
     const addStudent = async () => {
-      if (!selectedStudent.value) return;
+      if (!selectedStudent.value) {
+        showToast('Выберите студента для добавления', 'warning');
+        return;
+      }
+
       try {
         await api.addStudentToGroup(route.params.groupId, selectedStudent.value);
         await fetchGroupData();
         selectedStudent.value = '';
+        showToast('Студент успешно добавлен в группу');
       } catch (error) {
         console.error('Ошибка при добавлении студента:', error);
-        alert('Не удалось добавить студента.');
-      }
-    };
-
-    const removeStudent = async (studentId) => {
-      try {
-        await api.removeStudentFromGroup(route.params.groupId, studentId);
-        await fetchGroupData();
-      } catch (error) {
-        console.error('Ошибка при удалении студента:', error);
-        alert('Не удалось удалить студента.');
+        showToast('Не удалось добавить студента', 'error');
       }
     };
 
     return {
-      // данные
       group,
       students,
       availableStudents,
@@ -232,21 +328,98 @@ export default {
       currentStudent,
       studentTasks,
       loadingTasks,
+      toast,
+      showDeleteStudentConfirm,
+      studentToDelete,
+
+      // computed свойства
+      filteredAvailableStudents,
+      isSelectedStudentInGroup,
+      isStudentInGroup,
 
       // методы
       formatDate,
       getStatusText,
       addStudent,
-      removeStudent,
+      openRemoveStudentConfirm,
+      confirmRemoveStudent,
+      cancelRemoveStudent,
       checkStudentTask,
       backToStudents,
-      backToGroups
+      backToGroups,
+      hideToast
     };
   }
 };
 </script>
 
 <style scoped>
+/* Стили для модалки подтверждения */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 25px;
+  border-radius: 8px;
+  width: 400px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.modal-content h3 {
+  margin: 0 0 15px 0;
+  color: #dc3545;
+}
+
+.modal-content p {
+  margin: 0 0 20px 0;
+  color: #666;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.delete-btn {
+  background-color: #dc3545;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.delete-btn:hover {
+  background-color: #c82333;
+}
+
+.cancel-btn {
+  background-color: #6c757d;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  background-color: #5a6268;
+}
+
+/* Остальные стили без изменений */
 .group-detail {
   padding: 20px;
   max-width: 1000px;
@@ -336,7 +509,12 @@ export default {
   gap: 10px;
   margin-top: 20px;
 }
-
+.button-back{
+  margin-left: auto;
+  display: flex;
+  justify-content: right;
+  margin-bottom: 20px;
+}
 .student-select {
   flex: 1;
   padding: 8px;
@@ -421,6 +599,9 @@ export default {
 .back-btn {
   background: #7fb3e0;
   color: white;
+  display: flex;
+  align-items: center;
+  justify-content: right;
   border: none;
   padding: 8px 12px;
   border-radius: 4px;
@@ -464,5 +645,144 @@ export default {
 .status-OVERDUE {
   background-color: #f8d7da;
   color: #721c24;
+}
+
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 15px 20px;
+  border-radius: 8px;
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 300px;
+  max-width: 400px;
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out;
+}
+
+.toast-success {
+  background: #28a745;
+  border-left: 4px solid #1e7e34;
+}
+
+.toast-error {
+  background: #dc3545;
+  border-left: 4px solid #c82333;
+}
+
+.toast-warning {
+  background: #ffc107;
+  color: #856404;
+  border-left: 4px solid #e0a800;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5em;
+  cursor: pointer;
+  margin-left: 15px;
+  opacity: 0.8;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+.student-select-container {
+  flex: 1;
+  position: relative;
+}
+
+.student-select {
+  width: 100%;
+  padding: 10px 15px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 1em;
+  background-color: white;
+  transition: border-color 0.3s, background-color 0.3s;
+}
+
+.student-select:focus {
+  border-color: #4CAF50;
+  outline: none;
+}
+
+.student-select.already-in-group {
+  border-color: #ff9800;
+  background-color: #fff3e0;
+}
+
+.disabled-option {
+  background-color: #f5f5f5;
+  color: #999;
+  font-style: italic;
+}
+
+.already-in-group-text {
+  color: #ff9800;
+  font-size: 0.9em;
+  font-style: italic;
+}
+
+.student-select-info {
+  margin-top: 5px;
+  min-height: 20px;
+}
+
+.warning-text {
+  color: #ff9800;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.success-text {
+  color: #4CAF50;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.add-btn:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.add-btn:disabled:hover {
+  background-color: #cccccc;
+}
+
+/* Улучшенные стили для контейнера добавления студента */
+.add-student {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  align-items: flex-start;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+  .add-student {
+    flex-direction: column;
+  }
+
+  .student-select-container {
+    width: 100%;
+  }
+}
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 </style>

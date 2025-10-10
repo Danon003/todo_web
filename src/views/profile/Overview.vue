@@ -7,7 +7,7 @@
       <div class="stats-grid">
         <div class="stat-card">
           <h3>👥 Пользователи</h3>
-          <p class="stat-value">{{ stats.totalUsers || 0 }}</p>
+          <p class="stat-value">{{ stats.totalUsers }}</p>
           <div class="stat-details">
             <span>Студенты: {{ stats.roleStatistics?.ROLE_STUDENT || 0 }}</span>
             <span>Преподаватели: {{ stats.roleStatistics?.ROLE_TEACHER || 0 }}</span>
@@ -23,10 +23,6 @@
         <div class="stat-card">
           <h3>📋 Задачи</h3>
           <p class="stat-value">{{ stats.totalTasks || 0 }}</p>
-          <div class="stat-details">
-            <span>Активные: {{ stats.activeTasks || 0 }}</span>
-            <span>Завершенные: {{ stats.completedTasks || 0 }}</span>
-          </div>
         </div>
       </div>
     </div>
@@ -35,27 +31,45 @@
     <div v-else-if="user.role === 'ROLE_TEACHER'" class="teacher-dashboard">
       <div class="stats-grid">
         <div class="stat-card">
-          <h3>🎓 Мои студенты</h3>
-          <p class="stat-value">{{ stats.totalStudents || 0 }}</p>
-          <span v-if="stats.myGroups">в {{ stats.myGroups.length }} группах</span>
+          <h3>📈 Средний прогресс</h3>
+          <p class="stat-value">{{ formatNumber(stats.avgStudentProgress) }}%</p>
+          <span>задач выполнено в среднем</span>
         </div>
 
         <div class="stat-card">
-          <h3>📊 Статистика задач</h3>
-          <p class="stat-value">{{ stats.completedTasks || 0 }}/{{ stats.totalAssignedTasks || 0 }}</p>
-          <div class="progress-bar">
-            <div
-                class="progress-fill"
-                :style="{width: calculateProgress(stats.completedTasks, stats.totalAssignedTasks) + '%'}"
-            ></div>
+          <h3>📊 Нагрузка</h3>
+          <p class="stat-value">{{ formatNumber(stats.avgTasksPerStudent) }}</p>
+          <span>задач на студента</span>
+          <div class="sub-metric">
+            <small>от {{ stats.minTasks || 0 }} до {{ stats.maxTasks || 0 }}</small>
           </div>
-          <span>Выполнено</span>
+        </div>
+
+        <div class="stat-card warning">
+          <h3>⏰ Просрочки</h3>
+          <p class="stat-value">{{ stats.totalOverdueTasks || 0 }}</p>
+          <span>просроченных задач</span>
         </div>
 
         <div class="stat-card">
-          <h3>📅 Активность</h3>
-          <p class="stat-value">{{ stats.activeTasks || 0 }}</p>
-          <span>активных задач</span>
+          <h3>🐢 Стагнация</h3>
+          <p class="stat-value">{{ stats.stuckTasks || 0 }}</p>
+          <span>задач не менялись >2 недель</span>
+        </div>
+
+        <div class="stat-card">
+          <h3>👨‍🏫 Мои задания</h3>
+          <p class="stat-value">{{ stats.myCreatedTasks || 0 }}</p>
+          <div class="sub-metric">
+            <div class="metric-line">{{ stats.totalTasks || 0 }} всего в системе</div>
+          </div>
+        </div>
+
+        <!-- Добавляем 6-ю метрику для баланса -->
+        <div class="stat-card">
+          <h3>👥 Студенты</h3>
+          <p class="stat-value">{{ stats.totalStudents || 0 }}</p>
+          <span>в {{ stats.totalGroups || 0 }} группах</span>
         </div>
       </div>
     </div>
@@ -75,11 +89,13 @@
 
         <div class="stat-card" :class="{ 'deadline-warning': hasUpcomingDeadline }">
           <h3>⏰ Ближайший дедлайн</h3>
-          <p v-if="stats.nextDeadline" class="stat-value deadline-text">
+          <div v-if="stats.nextDeadline" class="stat-value deadline-text">
             {{ formatDate(stats.nextDeadline) }}
-          </p>
-          <p v-else class="stat-value">—</p>
-          <span>Нет предстоящих дедлайнов</span>
+          </div>
+          <div v-else class="stat-value">
+            <p>—</p>
+            <span>Нет предстоящих дедлайнов</span>
+          </div>
         </div>
       </div>
 
@@ -97,6 +113,10 @@
           <div class="status-bar completed">
             <span class="status-label">Выполнено</span>
             <span class="status-count">{{ stats.statusCount?.COMPLETED || 0 }}</span>
+          </div>
+          <div class="status-bar overdue">
+            <span class="status-label">Просрочено</span>
+            <span class="status-count">{{ stats.statusCount?.OVERDUE || 0 }}</span>
           </div>
         </div>
       </div>
@@ -131,50 +151,13 @@ export default {
 
     const fetchStats = async () => {
       try {
-        // Здесь будет вызов API для получения статистики
-        // Пока используем заглушки
-        stats.value = await getMockStatsBasedOnRole(user.value.role)
+        const responseStats = await api.getStats();
+        stats.value = responseStats.data
       } catch (error) {
         console.error('Ошибка загрузки статистики:', error)
       } finally {
         loading.value = false
       }
-    }
-
-    // Заглушка для демонстрации (замените на реальный API вызов)
-    const getMockStatsBasedOnRole = (role) => {
-      const mockStats = {
-        'ROLE_ADMIN': {
-          totalUsers: 154,
-          totalGroups: 12,
-          totalTasks: 287,
-          activeTasks: 189,
-          completedTasks: 98,
-          roleStatistics: {
-            ROLE_STUDENT: 132,
-            ROLE_TEACHER: 18,
-            ROLE_ADMIN: 4
-          }
-        },
-        'ROLE_TEACHER': {
-          totalStudents: 45,
-          totalAssignedTasks: 87,
-          completedTasks: 52,
-          activeTasks: 35,
-          myGroups: [{}, {}, {}] // 3 группы
-        },
-        'ROLE_STUDENT': {
-          activeTasks: 5,
-          completedTasks: 12,
-          nextDeadline: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // +3 дня
-          statusCount: {
-            NOT_STARTED: 2,
-            IN_PROGRESS: 3,
-            COMPLETED: 12
-          }
-        }
-      }
-      return mockStats[role] || {}
     }
 
     const calculateProgress = (completed, total) => {
@@ -190,7 +173,10 @@ export default {
         year: 'numeric'
       })
     }
-
+    const formatNumber = (number, decimals = 1) => {
+      if (number === null || number === undefined) return '0'
+      return Number(number).toFixed(decimals)
+    }
     const hasUpcomingDeadline = computed(() => {
       return stats.value.nextDeadline &&
           new Date(stats.value.nextDeadline) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
@@ -203,6 +189,7 @@ export default {
 
     return {
       user,
+      formatNumber,
       stats,
       loading,
       calculateProgress,
@@ -342,6 +329,11 @@ export default {
   color: #155724;
 }
 
+.status-bar.overdue {
+  background: #f5a2a2;
+  color: #8d0a0a;
+}
+
 .status-label {
   font-weight: 600;
 }
@@ -356,19 +348,131 @@ export default {
   padding: 40px;
   color: #666;
 }
+.teacher-dashboard {
+  padding: 20px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  border-left: 4px solid #42a5f5;
+}
+
+.stat-card.warning {
+  border-left-color: #ffa726;
+}
+
+.stat-card h3 {
+  margin: 0 0 15px 0;
+  font-size: 1.1em;
+  color: #333;
+}
+
+.stat-value {
+  font-size: 2.5em;
+  font-weight: bold;
+  margin: 0;
+  color: #1976d2;
+}
+
+.stat-card span {
+  color: #666;
+  font-size: 0.9em;
+}
+
+.sub-metric {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eee;
+}
+
+.sub-metric small {
+  color: #888;
+  font-size: 0.8em;
+}
+
+.teacher-dashboard {
+  padding: 20px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  border-left: 4px solid #42a5f5;
+  text-align: center;
+}
+
+.stat-card.warning {
+  border-left-color: #ffa726;
+}
+
+.stat-card h3 {
+  margin: 0 0 15px 0;
+  font-size: 1.1em;
+  color: #333;
+}
+
+.stat-value {
+  font-size: 2.2em;  /* Немного уменьшил для баланса */
+  font-weight: bold;
+  margin: 0;
+  color: #1976d2;
+}
+
+.stat-card span {
+  color: #666;
+  font-size: 0.9em;
+  display: block;
+  margin-top: 5px;
+}
+
+.sub-metric {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eee;
+}
+
+.sub-metric small {
+  color: #888;
+  font-size: 0.8em;
+}
 
 /* Адаптивность */
+@media (max-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 768px) {
   .stats-grid {
     grid-template-columns: 1fr;
   }
 
   .stat-card {
-    padding: 20px;
+    padding: 15px;
   }
 
   .stat-value {
-    font-size: 28px;
+    font-size: 2em;
   }
 }
 </style>

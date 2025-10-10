@@ -1,5 +1,11 @@
 <template>
   <div class="tasks-container">
+    <!-- Тосты для уведомлений -->
+    <div v-if="toast.show" :class="['toast', `toast-${toast.type}`]">
+      <span>{{ toast.message }}</span>
+      <button @click="hideToast" class="toast-close">×</button>
+    </div>
+
     <div class="tasks-header">
       <h2>Задачи</h2>
       <button v-if="user.role === 'ROLE_TEACHER'" @click="showCreateModal = true" class="create-btn">
@@ -110,7 +116,6 @@
               <option value="NOT_STARTED">Не начата</option>
               <option value="IN_PROGRESS">В процессе</option>
               <option value="COMPLETED">Завершена</option>
-
             </select>
           </div>
           <button type="submit" class="submit-btn">Обновить</button>
@@ -122,8 +127,7 @@
       <div class="modal-content">
         <span class="close" @click="showShareModal = false">&times;</span>
         <h3>Поделиться задачей: {{ taskToShare?.title }}</h3>
-
-        <div v-if="groupMembersLoading" class="loading-members">
+        <div v-if="groupMembersLoading || usersWithTaskLoading" class="loading-members">
           <div class="spinner"></div>
           <p>Загрузка списка группы...</p>
         </div>
@@ -134,15 +138,24 @@
                 v-for="member in filteredMembers"
                 :key="member.id"
                 class="member-item"
-                :class="{ selected: selectedMember === member.id }"
+                :class="{
+              selected: selectedMember === member.id,
+              'has-task': usersWithSharedTask.some(user => user.id === member.id)
+            }"
                 @click="selectMember(member)"
             >
               <div class="member-avatar">
-                {{ getInitials(member.name) }}
+                {{ getInitials(member.username) }}
               </div>
               <div class="member-info">
-                <h4>{{ member.name }}</h4>
+                <h4>{{ member.username }}</h4>
                 <p>{{ member.email }}</p>
+                <p v-if="usersWithSharedTask.some(user => user.id === member.id)" class="task-assigned">
+                  ✓ Задача уже назначена
+                </p>
+                <p v-else class="task-not-assigned">
+                  Можно поделиться
+                </p>
               </div>
             </div>
 
@@ -154,9 +167,10 @@
           <button
               @click="shareTask"
               class="submit-btn"
-              :disabled="!selectedMember || sharingInProgress"
+              :disabled="!selectedMember || sharingInProgress || isSelectedMemberHasTask"
           >
             <span v-if="sharingInProgress">Отправка...</span>
+            <span v-else-if="isSelectedMemberHasTask">Задача уже назначена</span>
             <span v-else>Поделиться</span>
           </button>
         </div>
@@ -167,7 +181,6 @@
 
 <script>
 import { ref, computed, onMounted } from 'vue';
-import axios from 'axios';
 import { useRouter } from 'vue-router';
 import api from "@/api/index.js";
 
@@ -183,6 +196,31 @@ export default {
     const showShareModal = ref(false);
     const currentTask = ref({});
     const selectedStatus = ref('NOT_STARTED');
+    const usersWithSharedTask = ref([]);
+    const usersWithTaskLoading = ref(false);
+
+    // Переменные для уведомлений
+    const toast = ref({
+      show: false,
+      message: '',
+      type: 'success'
+    });
+
+    const showToast = (message, type = 'success') => {
+      toast.value = {
+        show: true,
+        message,
+        type
+      };
+
+      setTimeout(() => {
+        hideToast();
+      }, 4000);
+    };
+
+    const hideToast = () => {
+      toast.value.show = false;
+    };
 
     const newTask = ref({
       title: '',
@@ -207,10 +245,25 @@ export default {
           tasks.value = response.data;
         } else {
           const response = await api.getMyTasks();
-          tasks.value = response.data; // ← уже содержит userStatus
+          tasks.value = response.data;
         }
       } catch (error) {
         console.error('Ошибка при получении задач:', error);
+        showToast('Не удалось загрузить задачи', 'error');
+      }
+    };
+
+    const fetchUsersWithTask = async (taskId) => {
+      usersWithTaskLoading.value = true;
+      try {
+        const response = await api.getUsersWithTask(taskId);
+        usersWithSharedTask.value = response.data;
+      } catch (error) {
+        console.error('Ошибка при получении пользователей с задачей:', error);
+        usersWithSharedTask.value = [];
+        showToast('Не удалось загрузить информацию о назначениях', 'error');
+      } finally {
+        usersWithTaskLoading.value = false;
       }
     };
 
@@ -237,7 +290,7 @@ export default {
 
       } catch (error) {
         console.error('Ошибка при получении данных группы:', error);
-        alert('Не удалось загрузить список одногруппников');
+        showToast('Не удалось загрузить список одногруппников', 'error');
         groupMembers.value = [];
       } finally {
         groupMembersLoading.value = false;
@@ -268,13 +321,21 @@ export default {
     });
 
     const filteredMembers = computed(() => {
-      if (!memberSearch.value) return groupMembers.value;
+      let members = groupMembers.value;
 
-      const search = memberSearch.value.toLowerCase();
-      return groupMembers.value.filter(member =>
-          member.name.toLowerCase().includes(search) ||
-          member.email.toLowerCase().includes(search)
-      );
+      if (memberSearch.value) {
+        const search = memberSearch.value.toLowerCase();
+        members = members.filter(member =>
+            member.name.toLowerCase().includes(search) ||
+            member.email.toLowerCase().includes(search)
+        );
+      }
+
+      return members;
+    });
+    const isSelectedMemberHasTask = computed(() => {
+      if (!selectedMember.value) return false;
+      return usersWithSharedTask.value.some(user => user.id === selectedMember.value);
     });
 
     const formatDate = (dateString) => {
@@ -316,29 +377,38 @@ export default {
       showStatusModal.value = true;
     };
 
-    const openShareModal = (task) => {
+    const openShareModal = async (task) => {
       taskToShare.value = task;
       selectedMember.value = null;
       memberSearch.value = '';
-      fetchGroupMembers();
+
+      // Параллельно загружаем одногруппников и пользователей с задачей
+      await Promise.all([
+        fetchGroupMembers(),
+        fetchUsersWithTask(task.id)
+      ]);
+
       showShareModal.value = true;
     };
 
     const selectMember = (member) => {
-      selectedMember.value = member.id;
+      // Запрещаем выбор пользователей, у которых уже есть задача
+      const memberHasTask = usersWithSharedTask.value.some(user => user.id === member.id);
+      if (!memberHasTask) {
+        selectedMember.value = member.id;
+      }
     };
 
     const updateTaskStatus = async () => {
       try {
-
         await api.updateTaskStatus(currentTask.value.id, selectedStatus.value);
 
         showStatusModal.value = false;
-        await fetchTasks(); // или fetchTask()
-
+        showToast('Статус задачи успешно обновлен');
+        await fetchTasks();
       } catch (error) {
         console.error('Ошибка при обновлении статуса:', error);
-        alert('Не удалось обновить статус задачи');
+        showToast('Не удалось обновить статус задачи', 'error');
       }
     };
 
@@ -347,13 +417,12 @@ export default {
 
       sharingInProgress.value = true;
       try {
-        const token = localStorage.getItem('jwt-token');
         const response = await api.shareTask(
             taskToShare.value.id, selectedMember.value
         );
 
         if (response.status === 200) {
-          alert('Задача успешно отправлена!');
+          showToast('Задача успешно отправлена!');
           showShareModal.value = false;
         } else {
           throw new Error('Не удалось отправить задачу');
@@ -370,7 +439,7 @@ export default {
           }
         }
 
-        alert(errorMessage);
+        showToast(errorMessage, 'error');
       } finally {
         sharingInProgress.value = false;
       }
@@ -378,9 +447,9 @@ export default {
 
     const createTask = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
         await api.createTask(newTask.value);
         showCreateModal.value = false;
+        showToast('Задача успешно создана');
         await fetchTasks();
         newTask.value = {
           title: '',
@@ -390,6 +459,7 @@ export default {
         };
       } catch (error) {
         console.error('Ошибка при создании задачи:', error);
+        showToast('Не удалось создать задачу', 'error');
       }
     };
 
@@ -427,13 +497,79 @@ export default {
       updateTaskStatus,
       shareTask,
       createTask,
-      assignTask
+      assignTask,
+      isSelectedMemberHasTask,
+      usersWithSharedTask,
+      usersWithTaskLoading,
+      toast,
+      hideToast
     };
   }
 };
 </script>
 
 <style scoped>
+/* Стили для тостов */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 15px 20px;
+  border-radius: 8px;
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 300px;
+  max-width: 400px;
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out;
+}
+
+.toast-success {
+  background: #28a745;
+  border-left: 4px solid #1e7e34;
+}
+
+.toast-error {
+  background: #dc3545;
+  border-left: 4px solid #c82333;
+}
+
+.toast-warning {
+  background: #ffc107;
+  color: #856404;
+  border-left: 4px solid #e0a800;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5em;
+  cursor: pointer;
+  margin-left: 15px;
+  opacity: 0.8;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Остальные стили без изменений */
 .tasks-container {
   padding: 20px;
 }
@@ -542,10 +678,6 @@ export default {
   border-radius: 4px;
   margin-top: 5px;
   display: inline-block;
-}
-.assign {
-  background-color: #1782e1;
-  color: white;
 }
 
 .share {
@@ -719,5 +851,36 @@ export default {
   padding: 20px;
   text-align: center;
   color: #666;
+}
+.member-item.has-task {
+  background-color: #f5f5f5;
+  border-color: #ddd;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.member-item.has-task:hover {
+  background-color: #f5f5f5;
+  border-color: #ddd;
+}
+
+.member-item.has-task.selected {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  box-shadow: none;
+  animation: none;
+}
+
+.task-assigned {
+  color: #28a745;
+  font-size: 0.8em;
+  font-weight: bold;
+  margin: 2px 0 0 0;
+}
+
+.task-not-assigned {
+  color: #6c757d;
+  font-size: 0.8em;
+  margin: 2px 0 0 0;
 }
 </style>

@@ -26,7 +26,7 @@
                 :key="member.id"
             >
               <div class="member-avatar" :style="{ backgroundColor: getAvatarColor(member) }">
-                {{ getInitials(member.name) }}
+                {{ getInitials(member.username) }}
               </div>
               <div class="member-info">
                 <h4>{{ member.username }}</h4>
