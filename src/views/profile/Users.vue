@@ -24,7 +24,6 @@
         Создать пользователя
       </button>
     </div>
-
     <!-- Вкладки -->
     <div class="tabs">
       <button
