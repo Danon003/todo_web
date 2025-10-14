@@ -34,7 +34,9 @@
 
       <!-- Вкладка: Студенты -->
       <div v-if="activeTab === 'students'" class="students-tab">
-      <div class="button-back">  <button @click="backToGroups" class="back-btn">← Назад к списку групп</button></div>
+        <div class="button-back">
+          <button @click="backToGroups" class="back-btn">← Назад к списку групп</button>
+        </div>
 
         <div class="students-list">
           <div v-for="student in students" :key="student.id" class="student-card">
@@ -61,41 +63,80 @@
         </div>
 
         <div v-if="user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER'" class="add-student">
-          <div class="student-select-container">
-            <select
-                v-model="selectedStudent"
-                class="student-select"
-                :class="{ 'already-in-group': isSelectedStudentInGroup }"
+          <div class="custom-dropdown">
+            <div
+                class="dropdown-header"
+                :class="{ 'dropdown-open': isDropdownOpen, 'has-selection': selectedStudent }"
+                @click="toggleDropdown"
             >
-              <option value="" disabled>Выберите студента</option>
-              <option
-                  v-for="student in filteredAvailableStudents"
-                  :key="student.id"
-                  :value="student.id"
-                  :disabled="isStudentInGroup(student.id)"
-                  :class="{ 'disabled-option': isStudentInGroup(student.id) }"
-              >
-                {{ student.username }}
-                <span v-if="isStudentInGroup(student.id)" class="already-in-group-text">
-                (уже в группе)
-              </span>
-              </option>
-            </select>
-
-            <div class="student-select-info">
-            <span v-if="isSelectedStudentInGroup" class="warning-text">
-              ⚠️ Этот студент уже в группе
-            </span>
-              <span v-else-if="selectedStudent" class="success-text">
-              ✓ Можно добавить
-            </span>
+          <span v-if="selectedStudent" class="selected-student">
+            {{ getSelectedStudentName() }}
+          </span>
+              <span v-else class="dropdown-placeholder">Выберите студента</span>
+              <span class="dropdown-arrow">▼</span>
             </div>
+
+            <div v-if="isDropdownOpen" class="dropdown-content">
+              <div v-if="availableStudentsLoading" class="dropdown-loading">
+                Загрузка студентов...
+              </div>
+              <div v-else-if="availableStudentsError" class="dropdown-error">
+                Ошибка загрузки: {{ availableStudentsError }}
+                <button @click="fetchAvailableStudents" class="retry-btn">Повторить</button>
+              </div>
+              <div v-else class="students-dropdown-list">
+                <div
+                    v-for="student in availableStudents"
+                    :key="student.id"
+                    class="dropdown-student-item"
+                    :class="{
+                selected: selectedStudent === student.id,
+                'in-current-group': isStudentInCurrentGroup(student.id),
+                'in-other-group': isStudentInAnyGroup(student.id) && !isStudentInCurrentGroup(student.id)
+              }"
+                    @click="selectStudent(student)"
+                >
+                  <div class="student-avatar">
+                    {{ getInitials(student.username) }}
+                  </div>
+                  <div class="student-info">
+                    <h4>{{ student.username }}</h4>
+                    <p>{{ student.email }}</p>
+                    <p v-if="isStudentInCurrentGroup(student.id)" class="status-text status-current">
+                      ⚠️ Уже в этой группе
+                    </p>
+                    <p v-else-if="isStudentInAnyGroup(student.id)" class="status-text status-other">
+                      ⚠️ Уже в другой группе
+                    </p>
+                    <p v-else class="status-text status-available">
+                      ✓ Можно добавить
+                    </p>
+                  </div>
+                </div>
+
+                <div v-if="availableStudents.length === 0" class="no-students">
+                  Нет доступных студентов
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="selected-student-info">
+        <span v-if="selectedStudent && isStudentInCurrentGroup(selectedStudent)" class="warning-text">
+          ⚠️ Этот студент уже в этой группе
+        </span>
+            <span v-else-if="selectedStudent && isStudentInAnyGroup(selectedStudent)" class="warning-text">
+          ⚠️ Этот студент уже в другой группе
+        </span>
+            <span v-else-if="selectedStudent" class="success-text">
+          ✓ Можно добавить в группу
+        </span>
           </div>
 
           <button
               @click="addStudent"
               class="add-btn"
-              :disabled="!selectedStudent || isSelectedStudentInGroup"
+              :disabled="!selectedStudent || isStudentInAnyGroup(selectedStudent)"
           >
             Добавить
           </button>
@@ -157,7 +198,13 @@ export default {
     const activeTab = ref('students');
     const loading = ref(true);
     const user = JSON.parse(localStorage.getItem('user') || {});
+    const studentsInGroups = ref([]);
 
+    // Новые переменные для управления состоянием загрузки
+    const availableStudentsLoading = ref(false);
+    const availableStudentsError = ref('');
+
+    const isDropdownOpen = ref(false);
     const toast = ref({
       show: false,
       message: '',
@@ -187,6 +234,7 @@ export default {
     const hideToast = () => {
       toast.value.show = false;
     };
+
     const filteredAvailableStudents = computed(() => {
       return availableStudents.value.filter(student =>
           !students.value.some(groupStudent => groupStudent.id === student.id)
@@ -201,7 +249,7 @@ export default {
       if (!selectedStudent.value) return false;
       return isStudentInGroup(selectedStudent.value);
     });
-    // Методы для подтверждения удаления студента
+
     const openRemoveStudentConfirm = (student) => {
       studentToDelete.value = student;
       showDeleteStudentConfirm.value = true;
@@ -227,7 +275,6 @@ export default {
       studentToDelete.value = null;
     };
 
-    // --- Получение данных группы ---
     const fetchGroupData = async () => {
       try {
         const groupResponse = await api.getGroupInfo(route.params.groupId);
@@ -236,10 +283,8 @@ export default {
         const studentsResponse = await api.getGroupStudents(route.params.groupId);
         students.value = studentsResponse.data;
 
-        if (user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER') {
-          const availableResponse = await api.getUsersByRole('STUDENT');
-          availableStudents.value = availableResponse.data;
-        }
+        // Загружаем доступных студентов отдельно
+        await fetchAvailableStudents();
 
         try {
           const tasksResponse = await api.getGroupTasks(route.params.groupId);
@@ -254,7 +299,46 @@ export default {
       }
     };
 
-    onMounted(fetchGroupData);
+
+
+
+    const toggleDropdown = () => {
+      isDropdownOpen.value = !isDropdownOpen.value;
+    };
+
+    const selectStudent = (student) => {
+      if (!isStudentInAnyGroup(student.id)) {
+        selectedStudent.value = student.id;
+        isDropdownOpen.value = false;
+      }
+    };
+
+    const getSelectedStudentName = () => {
+      if (!selectedStudent.value) return '';
+      const student = availableStudents.value.find(s => s.id === selectedStudent.value);
+      return student ? student.username : '';
+    };
+
+    const handleClickOutside = (event) => {
+      const dropdown = document.querySelector('.custom-dropdown');
+      if (dropdown && !dropdown.contains(event.target)) {
+        isDropdownOpen.value = false;
+      }
+    };
+
+    const getInitials = (username) => {
+      if (!username) return '??';
+      return username
+          .split(' ')
+          .map(name => name.charAt(0).toUpperCase())
+          .join('')
+          .slice(0, 2);
+    };
+
+    onMounted(() => {
+      fetchGroupData();
+      document.addEventListener('click', handleClickOutside);
+    });
 
     const checkStudentTask = async (studentId) => {
       loadingTasks.value = true;
@@ -276,6 +360,7 @@ export default {
         loadingTasks.value = false;
       }
     };
+
     const backToStudents = () => {
       activeTab.value = 'students';
       currentStudent.value = null;
@@ -300,9 +385,65 @@ export default {
       return statusMap[status] || status;
     };
 
+    const isStudentInAnyGroup = (studentId) => {
+      return studentsInGroups.value.some(student => student.id === studentId);
+    };
+
+    const isStudentInCurrentGroup = (studentId) => {
+      return students.value.some(student => student.id === studentId);
+    };
+
+    const canAddStudent = (studentId) => {
+      return !isStudentInAnyGroup(studentId) && !isStudentInCurrentGroup(studentId);
+    };
+
+    const fetchStudentsInGroups = async () => {
+      try {
+        const response = await api.getStudentsHasGroup();
+        studentsInGroups.value = response.data;
+      } catch (error) {
+        console.error('Ошибка при загрузке студентов в группах:', error);
+        showToast('Не удалось загрузить информацию о студентах в группах', 'error');
+      }
+    };
+
+    // Обновленный метод для загрузки доступных студентов
+    const fetchAvailableStudents = async () => {
+      if (user.role !== 'ROLE_ADMIN' && user.role !== 'ROLE_TEACHER') return;
+
+      availableStudentsLoading.value = true;
+      availableStudentsError.value = '';
+
+      try {
+        // Загружаем всех студентов системы
+        const availableResponse = await api.getUsersByRole('STUDENT');
+        availableStudents.value = availableResponse.data;
+
+        // Параллельно загружаем информацию о том, кто уже в группах
+        await fetchStudentsInGroups();
+      } catch (error) {
+        console.error('Ошибка при загрузке доступных студентов:', error);
+        availableStudentsError.value = error.message || 'Неизвестная ошибка';
+        showToast('Не удалось загрузить список студентов', 'error');
+      } finally {
+        availableStudentsLoading.value = false;
+      }
+    };
+
+    const selectAvailableStudent = (student) => {
+      if (canAddStudent(student.id)) {
+        selectedStudent.value = student.id;
+      }
+    };
+
     const addStudent = async () => {
       if (!selectedStudent.value) {
         showToast('Выберите студента для добавления', 'warning');
+        return;
+      }
+
+      if (isStudentInAnyGroup(selectedStudent.value)) {
+        showToast('Этот студент уже состоит в другой группе', 'warning');
         return;
       }
 
@@ -317,10 +458,10 @@ export default {
       }
     };
 
+
     return {
       group,
       students,
-      availableStudents,
       selectedStudent,
       activeTab,
       loading,
@@ -331,13 +472,22 @@ export default {
       toast,
       showDeleteStudentConfirm,
       studentToDelete,
+      availableStudentsLoading,
+      availableStudentsError,
+      availableStudents,
+      isDropdownOpen,
+
 
       // computed свойства
       filteredAvailableStudents,
-      isSelectedStudentInGroup,
       isStudentInGroup,
+      isSelectedStudentInGroup: computed(() => isStudentInCurrentGroup(selectedStudent.value)),
 
       // методы
+      isStudentInAnyGroup,
+      isStudentInCurrentGroup,
+      selectAvailableStudent,
+      fetchAvailableStudents,
       formatDate,
       getStatusText,
       addStudent,
@@ -347,7 +497,11 @@ export default {
       checkStudentTask,
       backToStudents,
       backToGroups,
-      hideToast
+      hideToast,
+      getInitials,
+      toggleDropdown,
+      selectStudent,
+      getSelectedStudentName,
     };
   }
 };
@@ -419,7 +573,165 @@ export default {
   background-color: #5a6268;
 }
 
-/* Остальные стили без изменений */
+/* НОВЫЕ СТИЛИ ДЛЯ ИНТЕРФЕЙСА ДОБАВЛЕНИЯ СТУДЕНТОВ */
+.add-student-section {
+  margin-top: 30px;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.add-student-title {
+  margin: 0 0 20px 0;
+  color: #495057;
+  font-size: 1.3em;
+}
+
+.available-students-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.student-select-item {
+  background: white;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 15px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.student-select-item:hover {
+  border-color: #17A2B8;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.student-select-item.selected {
+  border-color: #28a745;
+  background-color: #f8fff9;
+}
+
+.student-select-item.in-group {
+  border-color: #ffc107;
+  background-color: #fffcf3;
+  cursor: not-allowed;
+}
+
+.student-select-item.in-group:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: #ffc107;
+}
+
+.student-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #17A2B8, #6f42c1);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.9em;
+  flex-shrink: 0;
+}
+
+.student-info {
+  flex: 1;
+}
+
+.student-info h4 {
+  margin: 0 0 5px 0;
+  color: #495057;
+  font-size: 1em;
+}
+
+.student-info p {
+  margin: 0;
+  font-size: 0.85em;
+}
+
+.student-info .already-in-group {
+  color: #e0a800;
+  font-weight: 500;
+  margin-top: 5px;
+}
+
+.student-info .can-add {
+  color: #28a745;
+  font-weight: 500;
+  margin-top: 5px;
+}
+
+.loading-students {
+  text-align: center;
+  padding: 20px;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.error-message {
+  background: #f8d7da;
+  color: #721c24;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.retry-btn {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 10px;
+}
+
+.retry-btn:hover {
+  background: #c82333;
+}
+
+.no-students {
+  text-align: center;
+  padding: 30px;
+  color: #6c757d;
+  font-style: italic;
+  grid-column: 1 / -1;
+}
+
+.add-student-btn {
+  width: 100%;
+  padding: 12px;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.add-student-btn:hover:not(:disabled) {
+  background: #218838;
+}
+
+.add-student-btn:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+/* Остальные существующие стили без изменений */
 .group-detail {
   padding: 20px;
   max-width: 1000px;
@@ -445,6 +757,7 @@ export default {
   border-bottom: 1px solid #ddd;
   margin-bottom: 20px;
 }
+
 .tabs button {
   display: block;
   padding: 10px 20px;
@@ -494,6 +807,7 @@ export default {
   border-radius: 4px;
   cursor: pointer;
 }
+
 .check-btn {
   background-color: #bb8213;
   color: white;
@@ -504,31 +818,11 @@ export default {
   cursor: pointer;
 }
 
-.add-student {
-  display: flex;
-  gap: 10px;
-  margin-top: 20px;
-}
-.button-back{
+.button-back {
   margin-left: auto;
   display: flex;
   justify-content: right;
   margin-bottom: 20px;
-}
-.student-select {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-.add-btn {
-  background-color: #28A745;
-  color: white;
-  padding: 8px 15px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
 }
 
 .tasks-list {
@@ -615,6 +909,7 @@ export default {
   padding: 20px;
   font-style: italic;
 }
+
 .status {
   padding: 3px 8px;
   border-radius: 4px;
@@ -694,87 +989,7 @@ export default {
 .toast-close:hover {
   opacity: 1;
 }
-.student-select-container {
-  flex: 1;
-  position: relative;
-}
 
-.student-select {
-  width: 100%;
-  padding: 10px 15px;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  font-size: 1em;
-  background-color: white;
-  transition: border-color 0.3s, background-color 0.3s;
-}
-
-.student-select:focus {
-  border-color: #4CAF50;
-  outline: none;
-}
-
-.student-select.already-in-group {
-  border-color: #ff9800;
-  background-color: #fff3e0;
-}
-
-.disabled-option {
-  background-color: #f5f5f5;
-  color: #999;
-  font-style: italic;
-}
-
-.already-in-group-text {
-  color: #ff9800;
-  font-size: 0.9em;
-  font-style: italic;
-}
-
-.student-select-info {
-  margin-top: 5px;
-  min-height: 20px;
-}
-
-.warning-text {
-  color: #ff9800;
-  font-size: 0.9em;
-  font-weight: 500;
-}
-
-.success-text {
-  color: #4CAF50;
-  font-size: 0.9em;
-  font-weight: 500;
-}
-
-.add-btn:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
-}
-
-.add-btn:disabled:hover {
-  background-color: #cccccc;
-}
-
-/* Улучшенные стили для контейнера добавления студента */
-.add-student {
-  display: flex;
-  gap: 10px;
-  margin-top: 20px;
-  align-items: flex-start;
-}
-
-/* Адаптивность */
-@media (max-width: 768px) {
-  .add-student {
-    flex-direction: column;
-  }
-
-  .student-select-container {
-    width: 100%;
-  }
-}
 @keyframes slideIn {
   from {
     transform: translateX(100%);
@@ -783,6 +998,271 @@ export default {
   to {
     transform: translateX(0);
     opacity: 1;
+  }
+}
+.add-student {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+  position: relative;
+}
+
+.custom-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 15px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  background-color: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-height: 50px;
+}
+
+.dropdown-header:hover {
+  border-color: #17A2B8;
+}
+
+.dropdown-header.dropdown-open {
+  border-color: #17A2B8;
+  box-shadow: 0 2px 8px rgba(23, 162, 184, 0.2);
+}
+
+.dropdown-header.has-selection {
+  border-color: #28a745;
+  background-color: #f8fff9;
+}
+
+.dropdown-placeholder {
+  color: #999;
+}
+
+.selected-student {
+  font-weight: 500;
+  color: #495057;
+}
+
+.dropdown-arrow {
+  transition: transform 0.3s ease;
+  color: #666;
+}
+
+.dropdown-open .dropdown-arrow {
+  transform: rotate(180deg);
+}
+
+.dropdown-content {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 2px solid #17A2B8;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.students-dropdown-list {
+  padding: 8px 0;
+}
+
+.dropdown-student-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 15px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.dropdown-student-item:last-child {
+  border-bottom: none;
+}
+
+.dropdown-student-item:hover {
+  background-color: #f8f9fa;
+}
+
+.dropdown-student-item.selected {
+  background-color: #e8f5e8;
+}
+
+.dropdown-student-item.in-current-group {
+  background-color: #fffcf3;
+  cursor: not-allowed;
+}
+
+.dropdown-student-item.in-other-group {
+  background-color: #fff5f5;
+  cursor: not-allowed;
+}
+
+.dropdown-student-item.in-current-group:hover,
+.dropdown-student-item.in-other-group:hover {
+  background-color: inherit;
+}
+
+.student-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #17A2B8, #6f42c1);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.8em;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.student-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.student-info h4 {
+  margin: 0 0 4px 0;
+  color: #495057;
+  font-size: 0.95em;
+  font-weight: 500;
+}
+
+.student-info p {
+  margin: 0;
+  font-size: 0.8em;
+  color: #666;
+}
+
+.status-text {
+  font-size: 0.75em !important;
+  font-weight: 500;
+  margin-top: 4px !important;
+}
+
+.status-available {
+  color: #28a745;
+}
+
+.status-current {
+  color: #e0a800;
+}
+
+.status-other {
+  color: #dc3545;
+}
+
+.dropdown-loading,
+.dropdown-error,
+.no-students {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+  font-style: italic;
+}
+
+.dropdown-error {
+  color: #dc3545;
+  background-color: #f8d7da;
+  margin: 8px;
+  border-radius: 4px;
+  padding: 15px;
+}
+
+.retry-btn {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 10px;
+  font-size: 0.8em;
+}
+
+.selected-student-info {
+  min-height: 20px;
+  padding: 0 5px;
+}
+
+.warning-text {
+  color: #dc3545;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.success-text {
+  color: #28a745;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.add-btn {
+  background-color: #28A745;
+  color: white;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1em;
+  font-weight: 500;
+  transition: background-color 0.3s;
+  align-self: flex-start;
+}
+
+.add-btn:hover:not(:disabled) {
+  background-color: #218838;
+}
+
+.add-btn:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+  .dropdown-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90vw;
+    max-width: 400px;
+    max-height: 70vh;
+    border-radius: 8px;
+    border: 2px solid #17A2B8;
+  }
+
+  .dropdown-student-item {
+    padding: 15px;
+  }
+}
+/* Адаптивность */
+@media (max-width: 768px) {
+  .available-students-list {
+    grid-template-columns: 1fr;
+  }
+
+  .student-select-item {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .student-avatar {
+    align-self: center;
   }
 }
 </style>

@@ -122,10 +122,15 @@ export default {
     getUsersByRole(role) {
         return api.get(`/admin/users/by-role?role=${role}`)
     },
+    getRoleAuditLog(){
+      return api.get('admin/role-audit-log')
+    },
     getMyUsers(){
         return api.get('/group/my-students')
     },
-
+    getStudentsHasGroup(){
+        return api.get('/group/students_has_group')
+    },
     // User info
     getUserInfo() {
         return api.get('/user/me/info')
