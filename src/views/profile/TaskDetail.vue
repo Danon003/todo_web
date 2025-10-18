@@ -30,6 +30,19 @@
 
       <div class="task-body">
         <p class="description">{{ task.description }}</p>
+        <div class="task-tags" v-if="task.tags && task.tags.length > 0">
+          <span
+              v-for="tag in task.tags"
+              :key="tag"
+              class="tag"
+              :class="getTagClass(tag)"
+          >
+            {{ typeof tag === 'string' ? tag : tag.name }}
+          </span>
+        </div>
+        <div v-else class="no-tags">
+          <span class="no-tags-text">Нет тегов</span>
+        </div>
 
         <div class="task-info">
           <div class="info-item">
@@ -220,7 +233,7 @@ export default {
       try {
         await api.deleteTask(route.params.taskId);
         showToast('Задача успешно удалена');
-        router.push('/profile/tasks');
+        await router.push('/profile/tasks');
       } catch (error) {
         console.error('Ошибка при удалении задачи:', error);
         showToast('Не удалось удалить задачу', 'error');
@@ -332,6 +345,19 @@ export default {
     const getGroupStudentCount = (groupId) => {
       const students = groupStudents.value[groupId];
       return students ? students.length : 0;
+    };
+
+    const getTagClass = (tag) => {
+      // Получаем имя тега (может быть объектом или строкой)
+      const tagName = typeof tag === 'string' ? tag : tag.name || '';
+
+      // Генерируем класс на основе имени тега для разных цветов
+      const tagColors = [
+        'tag-primary', 'tag-secondary', 'tag-success',
+        'tag-warning', 'tag-danger', 'tag-info'
+      ];
+      const index = tagName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % tagColors.length;
+      return tagColors[index];
     };
 
 // Получить количество студентов в группе с задачей
@@ -519,6 +545,7 @@ export default {
       openDeleteConfirm,
       confirmDeleteTask,
       cancelDeleteTask,
+      getTagClass,
       showDeleteConfirm,
       showStudentModal,
       students,
@@ -716,7 +743,73 @@ export default {
   border-radius: 8px;
   margin-bottom: 20px;
 }
+.task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 10px 0;
+}
 
+.tag {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.8em;
+  font-weight: 500;
+  color: white;
+}
+
+/* Цвета для тегов */
+.tag-primary { background-color: #007bff; }
+.tag-secondary { background-color: #6c757d; }
+.tag-success { background-color: #28a745; }
+.tag-warning { background-color: #ffc107; color: #000; }
+.tag-danger { background-color: #dc3545; }
+.tag-info { background-color: #17a2b8; }
+
+.no-tags {
+  margin: 10px 0;
+}
+
+.no-tags-text {
+  font-size: 0.9em;
+  color: #6c757d;
+  font-style: italic;
+}
+
+/* Стили для выбора тегов при создании */
+.tags-selection {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.available-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.tag-selectable {
+  display: inline-block;
+  padding: 5px 10px;
+  border: 1px solid #ddd;
+  border-radius: 15px;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tag-selectable:hover {
+  background-color: #f8f9fa;
+}
+
+.tag-selectable.selected {
+  background-color: #007bff;
+  color: white;
+  border-color: #007bff;
+}
 .info-item {
   display: flex;
   margin-bottom: 10px;

@@ -66,6 +66,13 @@ export default {
     getUsersWithTask(taskId) {
         return api.get(`/task/getListTask/${taskId}`)
     },
+    getAvailableTags() {
+        return api.get('/tag')
+    },
+    // Создать новый тег
+    createTag (tagData) {
+        return api.post('/tags', {tagData});
+    },
 
     // Groups
     getGroups() {
@@ -174,5 +181,6 @@ export default {
         params: { userId: localStorage.getItem('userId') },
         headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
     }),
+
 
 }
