@@ -18,6 +18,158 @@
       </div>
     </div>
 
+    <!-- Модальное окно редактирования задачи -->
+    <div v-if="showEditModal" class="modal">
+      <div class="modal-content large-modal">
+        <span class="close" @click="closeEditModal">&times;</span>
+        <h3>Редактировать задачу</h3>
+        <form @submit.prevent="updateTask">
+          <div class="form-group">
+            <label>Название:</label>
+            <input v-model="editTask.title" type="text" required>
+          </div>
+          <div class="form-group">
+            <label>Описание:</label>
+            <textarea v-model="editTask.description" required></textarea>
+          </div>
+          <div class="form-group">
+            <label>Дедлайн:</label>
+            <input v-model="editTask.deadline" type="datetime-local" required>
+          </div>
+          <div class="form-group">
+            <label>Приоритет:</label>
+            <select v-model="editTask.priority" required>
+              <option value="LOW">Низкий</option>
+              <option value="MEDIUM">Средний</option>
+              <option value="HIGH">Высокий</option>
+            </select>
+          </div>
+
+          <!-- Блок тегов при редактировании -->
+          <div class="form-group">
+            <label>Теги:</label>
+            <div class="tags-selection">
+              <div class="available-tags-container">
+                <div class="available-tags-header">
+                  <span>Доступные теги ({{ availableTags.length }})</span>
+                  <div class="tags-search" v-if="availableTags.length > 5">
+                    <input
+                        v-model="tagSearch"
+                        type="text"
+                        placeholder="Поиск тега..."
+                        class="tag-search-input"
+                    >
+                  </div>
+                </div>
+
+                <div class="available-tags-scrollable">
+                  <div v-if="filteredAvailableTags.length === 0" class="no-tags-available">
+                    {{ tagSearch ? 'Теги не найдены' : 'Нет доступных тегов' }}
+                  </div>
+                  <span
+                      v-else
+                      v-for="tag in filteredAvailableTags"
+                      :key="tag.id"
+                      class="tag-selectable"
+                      :class="{
+                        selected: editTask.selectedTagIds.includes(tag.id),
+                        'search-match': tagSearch && tag.name.toLowerCase().includes(tagSearch.toLowerCase())
+                      }"
+                      @click="toggleTagSelection(tag.id)"
+                  >
+                    {{ tag.name }}
+                    <span v-if="editTask.selectedTagIds.includes(tag.id)" class="selected-indicator">✓</span>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Блок добавления новых тегов -->
+              <div class="custom-tags-section">
+                <div class="tag-input-container">
+                  <input
+                      v-model="editTask.customTag"
+                      type="text"
+                      placeholder="Добавить новый тег..."
+                      @keydown.enter.prevent="addCustomTag"
+                      class="tag-input"
+                  >
+                  <button type="button" @click="addCustomTag" class="add-tag-btn">+</button>
+                </div>
+
+                <div v-if="editTask.customTags.length > 0" class="custom-tags">
+                  <span class="custom-tags-label">Новые теги:</span>
+                  <span
+                      v-for="tag in editTask.customTags"
+                      :key="tag"
+                      class="tag custom-tag"
+                  >
+                    {{ tag }}
+                    <span @click="removeCustomTag(tag)" class="remove-tag">×</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" @click="closeEditModal" class="cancel-btn">Отмена</button>
+            <button type="submit" class="submit-btn" :disabled="updatingTask">
+              {{ updatingTask ? 'Сохранение...' : 'Сохранить' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Модальное окно прикрепления файла -->
+    <div v-if="showAttachModal" class="modal">
+      <div class="modal-content">
+        <span class="close" @click="closeAttachModal">&times;</span>
+        <h3>Прикрепить файл к задаче</h3>
+
+        <div class="file-upload-section">
+          <div
+              class="file-dropzone"
+              @click="triggerFileInput"
+              @drop="handleFileDrop"
+              @dragover.prevent
+              @dragenter.prevent
+          >
+            <div class="dropzone-content">
+              <span class="upload-icon">📎</span>
+              <p>Перетащите файл сюда или нажмите для выбора</p>
+              <small>Максимальный размер: 10MB</small>
+            </div>
+            <input
+                type="file"
+                ref="fileInput"
+                @change="handleFileSelect"
+                style="display: none"
+            >
+          </div>
+
+          <div v-if="selectedFile" class="file-preview">
+            <div class="file-info">
+              <span class="file-name">{{ selectedFile.name }}</span>
+              <span class="file-size">({{ formatFileSize(selectedFile.size) }})</span>
+              <button @click="removeFile" class="remove-file-btn">×</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" @click="closeAttachModal" class="cancel-btn">Отмена</button>
+          <button
+              @click="uploadFile"
+              class="submit-btn"
+              :disabled="!selectedFile || uploadingFile"
+          >
+            {{ uploadingFile ? 'Загрузка...' : 'Прикрепить файл' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="loading" class="loading">Загрузка...</div>
     <div v-else-if="task" class="task-content">
       <div class="task-header">
@@ -46,13 +198,203 @@
 
         <div class="task-info">
           <div class="info-item">
-          </div>
-          <div class="info-item">
             <span class="label">Дедлайн:</span>
             <span class="value">{{ formatDate(task.deadline) }}</span>
           </div>
+          <div class="info-item" v-if="task.files && task.files.length > 0">
+            <span class="label">Файлов:</span>
+            <span class="value">{{ task.files.length }}</span>
+          </div>
+        </div>
+        <!-- Прикрепленные файлы - ОСНОВНОЙ БЛОК -->
+        <div v-if="task.files && task.files.length > 0" class="attached-files-list">
+          <h4>Прикрепленные файлы:</h4>
+          <div v-for="file in task.files" :key="file.id" class="file-item">
+            <span class="file-icon">📎</span>
+            <span class="file-name">{{ file.originalFileName }}</span>
+            <a :href="file.url" target="_blank" class="download-link">Скачать</a>
+            <button
+                v-if="user.role === 'ROLE_TEACHER'"
+                @click="deleteFile(file.id)"
+                class="delete-file-btn"
+            >
+              Удалить
+            </button>
+          </div>
         </div>
 
+        <div v-if="showSolutionsModal" class="modal">
+          <div class="modal-content large-modal">
+            <span class="close" @click="showSolutionsModal = false">&times;</span>
+            <h3>Решения студентов</h3>
+
+            <div v-if="solutionsLoading" class="loading">Загрузка решений...</div>
+            <div v-else class="solutions-list">
+              <div v-for="solution in solutions" :key="solution.studentId" class="solution-item">
+                <div class="student-info">
+                  <div class="student-avatar">
+                    {{ getInitials(solution.studentName) }}
+                  </div>
+                  <div class="student-details">
+                    <h4>{{ solution.studentName }}</h4>
+                    <div v-if="solution.fileName" class="solution-file">
+                      <span class="file-icon">📄</span>
+                      <span class="file-name">{{ solution.fileName }}</span>
+                      <span class="file-size">({{ formatFileSize(solution.fileSize) }})</span>
+                      <a @click="downloadStudentSolution(solution.studentId)" class="download-link">Скачать</a>
+                    </div>
+                    <div v-else class="no-solution">
+                      <span class="no-solution-text">Решение не загружено</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="grading-section">
+                  <div class="grade-input">
+                    <label>Оценка:</label>
+                    <input
+                        v-model="solution.grade"
+                        type="number"
+                        min="0"
+                        max="100"
+                        @change="updateGrade(solution)"
+                        class="grade-field"
+                    >
+                  </div>
+                  <div class="comment-input">
+                    <label>Комментарий:</label>
+                    <textarea
+                        v-model="solution.teacherComment"
+                        @change="updateGrade(solution)"
+                        placeholder="Комментарий преподавателя..."
+                        class="comment-field"
+                    ></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="solutions.length === 0" class="no-solutions">
+                Нет назначенных студентов или решений
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- блок для студента -->
+        <div v-if="user.role === 'ROLE_STUDENT'" class="student-solution-section">
+          <div class="solution-header">
+            <h3>📝 Решение задачи</h3>
+            <p class="solution-description">Загрузите файл с вашим решением. Преподаватель получит уведомление о новой работе.</p>
+          </div>
+
+          <!-- Состояние: решение уже загружено -->
+          <div v-if="studentSolution" class="solution-uploaded">
+            <div class="uploaded-header">
+              <h4>✅ Решение загружено</h4>
+              <span class="upload-date">{{ formatDate(studentSolution.uploadedAt) }}</span>
+            </div>
+
+            <div class="solution-file-card">
+              <div class="file-info">
+                <div class="file-icon-name">
+                  <span class="file-icon">📄</span>
+                  <div class="file-details">
+                    <span class="file-name">{{ studentSolution.fileName }}</span>
+                    <span class="file-size">{{ formatFileSize(studentSolution.fileSize) }}</span>
+                  </div>
+                </div>
+                <div class="file-actions">
+                  <a :href="studentSolution.downloadUrl" target="_blank" class="download-btn">
+                    📥 Скачать
+                  </a>
+                  <button @click="deleteStudentSolution" class="delete-btn" title="Удалить решение">
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Оценка преподавателя -->
+            <div v-if="studentSolution.grade !== null || studentSolution.teacherComment" class="teacher-feedback">
+              <h5>📊 Обратная связь от преподавателя:</h5>
+
+              <div v-if="studentSolution.grade !== null" class="grade-badge">
+                <span class="grade-label">Оценка:</span>
+                <span class="grade-value">{{ studentSolution.grade }}/100</span>
+              </div>
+
+              <div v-if="studentSolution.teacherComment" class="comment-box">
+                <span class="comment-label">Комментарий:</span>
+                <p class="comment-text">{{ studentSolution.teacherComment }}</p>
+              </div>
+            </div>
+
+            <div v-else class="waiting-feedback">
+              <p>⏳ Ожидайте оценку от преподавателя...</p>
+            </div>
+          </div>
+
+          <!-- Состояние: решение не загружено -->
+          <div v-else class="solution-upload">
+            <div class="upload-area">
+              <div
+                  class="upload-zone"
+                  @click="triggerSolutionFileInput"
+                  @drop="handleSolutionFileDrop"
+                  @dragover.prevent
+                  @dragenter.prevent
+              >
+                <div class="upload-content">
+                  <div class="upload-icon">📤</div>
+                  <h4>Загрузить решение</h4>
+                  <p>Перетащите файл сюда или нажмите для выбора</p>
+                  <div class="upload-hint">
+                    <small>📎 Поддерживаемые форматы: PDF, DOC, DOCX, ZIP</small>
+                    <small>⚡ Максимальный размер: 10MB</small>
+                  </div>
+                </div>
+                <input
+                    type="file"
+                    ref="solutionFileInput"
+                    @change="handleSolutionFileSelect"
+                    style="display: none"
+                >
+              </div>
+
+              <!-- Предпросмотр выбранного файла -->
+              <div v-if="selectedSolutionFile" class="file-preview-card">
+                <div class="preview-header">
+                  <span class="preview-title">Выбранный файл:</span>
+                  <button @click="removeSolutionFile" class="remove-preview-btn" title="Удалить файл">
+                    ×
+                  </button>
+                </div>
+                <div class="preview-content">
+                  <span class="file-icon">📄</span>
+                  <div class="file-details">
+                    <span class="file-name">{{ selectedSolutionFile.name }}</span>
+                    <span class="file-size">{{ formatFileSize(selectedSolutionFile.size) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+                @click="uploadStudentSolution"
+                class="upload-submit-btn"
+                :disabled="!selectedSolutionFile || uploadingSolution"
+                :class="{ 'loading': uploadingSolution }"
+            >
+      <span v-if="uploadingSolution">
+        ⏳ Загрузка...
+      </span>
+              <span v-else>
+        ✅ Отправить решение
+      </span>
+            </button>
+          </div>
+        </div>
+        
         <div class="task-actions">
           <button v-if="user.role === 'ROLE_TEACHER'"
                   @click="assignToOthers"
@@ -63,6 +405,21 @@
                   @click="assignToStudent"
                   class="action-btn">
             Назначить задачу
+          </button>
+          <button v-if="user.role === 'ROLE_TEACHER'"
+                  @click="openAttach"
+                  class="action-btn attach">
+            Прикрепить файл
+          </button>
+          <button v-if="user.role === 'ROLE_TEACHER'"
+                  @click="openSolutionsModal"
+                  class="action-btn solutions">
+            Просмотр решений
+          </button>
+          <button v-if="user.role === 'ROLE_TEACHER'"
+                  @click="openEdit"
+                  class="action-btn change">
+            Редактировать
           </button>
           <button v-if="user.role === 'ROLE_TEACHER'"
                   @click="openDeleteConfirm"
@@ -188,7 +545,6 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import api from "@/api/index.js";
-import axios from "axios";
 
 export default {
   name: 'TaskDetail',
@@ -198,6 +554,16 @@ export default {
     const task = ref(null);
     const loading = ref(true);
     const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const availableTags = ref([]);
+    const tagSearch = ref('');
+    const updatingTask = ref(false);
+    const showSolutionsModal = ref(false);
+    const solutions = ref([]);
+    const solutionsLoading = ref(false);
+    const studentSolution = ref(null);
+    const selectedSolutionFile = ref(null);
+    const solutionFileInput = ref(null);
+    const uploadingSolution = ref(false);
 
     // Переменные для уведомлений
     const toast = ref({
@@ -257,32 +623,111 @@ export default {
     const groups = ref([]);
     const groupsLoading = ref(false);
     const assignmentLoading = ref(false);
+    const showEditModal = ref(false);
+    const editTask = ref({
+      title: '',
+      description: '',
+      deadline: '',
+      priority: 'MEDIUM',
+      selectedTagIds: [],
+      customTags: [],
+      customTag: ''
+    });
+
+    const showAttachModal = ref(false);
+    const selectedFile = ref(null);
+    const fileInput = ref(null);
+    const uploadingFile = ref(false);
+    const attachedFiles = ref([]);
+
+    // ИСПРАВЛЕННЫЙ МЕТОД ЗАГРУЗКИ ЗАДАЧИ
+    const fetchTask = async () => {
+      try {
+        let response;
+        if (user.role === 'ROLE_TEACHER') {
+          response = await api.getTask(route.params.taskId);
+        } else {
+          response = await api.getMyTask(route.params.taskId);
+        }
+
+        task.value = response.data;
+        console.log('Загруженная задача:', task.value);
+
+        // ОБЯЗАТЕЛЬНО загружаем файлы отдельно, если их нет в ответе
+        if (!task.value.files || task.value.files.length === 0) {
+          await fetchTaskFiles();
+        }
+
+        if (user.role === 'ROLE_TEACHER') {
+          await fetchUsersWithTask();
+        }
+      } catch (error) {
+        console.error('Ошибка при получении задачи:', error);
+        showToast('Не удалось загрузить задачу', 'error');
+      } finally {
+        loading.value = false;
+      }
+    };
+
+    // НОВЫЙ МЕТОД ДЛЯ ЗАГРУЗКИ ФАЙЛОВ ЗАДАЧИ
+    const fetchTaskFiles = async () => {
+      try {
+        const response = await api.getTaskFiles(route.params.taskId);
+        console.log('Загруженные файлы задачи:', response.data);
+
+        // Обновляем файлы с правильными URL для скачивания
+        const filesWithUrls = await Promise.all(
+            response.data.map(async (file) => {
+              try {
+                // Получаем URL для скачивания для каждого файла
+                const downloadResponse = await api.getFileDownloadUrl(route.params.taskId, file.id);
+                return {
+                  ...file,
+                  url: downloadResponse.data,
+                  downloadUrl: downloadResponse.data
+                };
+              } catch (error) {
+                console.error(`Не удалось получить URL для файла ${file.id}:`, error);
+                return {
+                  ...file,
+                  url: null,
+                  downloadUrl: null
+                };
+              }
+            })
+        );
+
+        // Обновляем файлы в задаче
+        if (task.value) {
+          task.value.files = filesWithUrls;
+        }
+
+        // Также обновляем attachedFiles для модального окна
+        attachedFiles.value = filesWithUrls;
+      } catch (error) {
+        console.error('Ошибка при загрузке файлов задачи:', error);
+      }
+    };
 
     const fetchUsersWithTask = async () => {
       usersWithTaskLoading.value = true;
       try {
-        // Загружаем пользователей с задачей
         const usersResponse = await api.getUsersWithTask(route.params.taskId);
         usersWithTask.value = usersResponse.data;
 
-        // Загружаем все группы преподавателя
         const groupsResponse = await api.getGroups();
         const allGroups = groupsResponse.data;
 
         groupsWithTask.value = [];
-        groupStudents.value = {}; // Очищаем предыдущие данные
+        groupStudents.value = {};
 
-        // Для каждой группы загружаем студентов и проверяем задачу
         for (const group of allGroups) {
           try {
-            // Загружаем студентов группы
             const groupUsersResponse = await api.getGroupStudents(group.id);
             const groupUsers = groupUsersResponse.data;
 
-            // Сохраняем студентов группы
             groupStudents.value[group.id] = groupUsers;
 
-            // Проверяем, есть ли задача у ВСЕХ пользователей группы
             const allUsersHaveTask = groupUsers.length > 0 && groupUsers.every(groupUser =>
                 usersWithTask.value.some(userWithTask => userWithTask.id === groupUser.id)
             );
@@ -292,7 +737,7 @@ export default {
             }
           } catch (error) {
             console.error(`Ошибка при получении пользователей группы ${group.id}:`, error);
-            groupStudents.value[group.id] = []; // Сохраняем пустой массив в случае ошибки
+            groupStudents.value[group.id] = [];
           }
         }
       } catch (error) {
@@ -302,23 +747,193 @@ export default {
         usersWithTaskLoading.value = false;
       }
     };
+    const openSolutionsModal = async () => {
+      showSolutionsModal.value = true;
+      await fetchSolutions();
+    };
 
-    const fetchTask = async () => {
+    const fetchSolutions = async () => {
+      solutionsLoading.value = true;
       try {
-        if (user.role === 'ROLE_TEACHER') {
-          const response = await api.getTask(route.params.taskId);
-          task.value = response.data;
-          // Загружаем информацию о пользователях с задачей
-          await fetchUsersWithTask();
-        } else {
-          const response = await api.getMyTask(route.params.taskId);
-          task.value = response.data;
+        const response = await api.getTaskSolutions(route.params.taskId);
+        solutions.value = response.data;
+      } catch (error) {
+        console.error('Ошибка при загрузке решений:', error);
+        showToast('Не удалось загрузить решения', 'error');
+      } finally {
+        solutionsLoading.value = false;
+      }
+    };
+
+    const downloadStudentSolution = async (studentId) => {
+      try {
+        const response = await api.downloadStudentSolution(route.params.taskId, studentId);
+        const downloadUrl = response.data;
+        if (downloadUrl) {
+          window.open(downloadUrl, '_blank');
         }
       } catch (error) {
-        console.error('Ошибка при получении задачи:', error);
-        showToast('Не удалось загрузить задачу', 'error');
+        console.error('Ошибка при скачивании решения:', error);
+        showToast('Не удалось скачать решение', 'error');
+      }
+    };
+
+    const updateGrade = async (solution) => {
+      try {
+        await api.gradeSolution(route.params.taskId, solution.studentId, {
+          grade: solution.grade,
+          comment: solution.teacherComment
+        });
+        showToast('Оценка обновлена');
+      } catch (error) {
+        console.error('Ошибка при обновлении оценки:', error);
+        showToast('Не удалось обновить оценку', 'error');
+      }
+    };
+
+// Методы для студента
+    const fetchStudentSolution = async () => {
+      try {
+        const solutionResponse = await api.getStudentSolution(route.params.taskId);
+        console.log('Данные решения:', solutionResponse.data);
+
+        const solution = solutionResponse.data;
+        if (solution && solution.fileName) {
+          console.log('Решение найдено через эндпоинт решения');
+
+          studentSolution.value = {
+            fileName: solution.fileName,
+            fileSize: solution.fileSize,
+            uploadedAt: solution.uploadedAt,
+            downloadUrl: solution.downloadUrl,
+            grade: solution.grade || null,
+            teacherComment: solution.teacherComment || null
+          };
+          return;
+        }
+      } catch (error) {
+        console.log('Не удалось получить данные решения:', error);
+      }
+    };
+
+    const triggerSolutionFileInput = () => {
+      const tempInput = document.createElement('input');
+      tempInput.type = 'file';
+      tempInput.style.display = 'none';
+      tempInput.onchange = (event) => {
+        handleSolutionFileSelect(event);
+        document.body.removeChild(tempInput);
+      };
+      document.body.appendChild(tempInput);
+      tempInput.click();
+    };
+
+    const handleSolutionFileSelect = (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        if (file.size > 10 * 1024 * 1024) {
+          showToast('Файл слишком большой. Максимальный размер: 10MB', 'error');
+          return;
+        }
+        selectedSolutionFile.value = file;
+      }
+    };
+
+    const handleSolutionFileDrop = (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer.files[0];
+      if (file) {
+        if (file.size > 10 * 1024 * 1024) {
+          showToast('Файл слишком большой. Максимальный размер: 10MB', 'error');
+          return;
+        }
+        selectedSolutionFile.value = file;
+      }
+    };
+
+    const removeSolutionFile = () => {
+      selectedSolutionFile.value = null;
+      if (solutionFileInput.value) {
+        solutionFileInput.value.value = '';
+      }
+    };
+
+    const uploadStudentSolution = async () => {
+      if (!selectedSolutionFile.value) return;
+
+      uploadingSolution.value = true;
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedSolutionFile.value);
+
+        console.log('Начинаем загрузку решения...');
+        await api.uploadStudentSolution(route.params.taskId, formData);
+        console.log('Решение успешно загружено на сервер');
+
+        showToast('Решение успешно загружено');
+        removeSolutionFile();
+
+        // ОБНОВЛЯЕМ ДАННЫЕ ПОСЛЕ ЗАГРУЗКИ
+        console.log('Обновляем данные...');
+        await fetchStudentSolution(); // Обновляем решение студента
+        await fetchTask(); // Обновляем задачу
+
+        console.log('Данные обновлены, studentSolution:', studentSolution.value);
+
+      } catch (error) {
+        console.error('Ошибка при загрузке решения:', error);
+        console.error('Детали ошибки:', error.response?.data);
+        showToast('Не удалось загрузить решение', 'error');
       } finally {
-        loading.value = false;
+        uploadingSolution.value = false;
+      }
+    };
+
+    const deleteStudentSolution = async () => {
+      try {
+        await api.deleteStudentSolution(route.params.taskId);
+        showToast('Решение удалено');
+        studentSolution.value = null;
+      } catch (error) {
+        console.error('Ошибка при удалении решения:', error);
+        showToast('Не удалось удалить решение', 'error');
+      }
+    };
+
+// Обновим fetchTask для студента
+    onMounted(async () => {
+      await fetchTask();
+      if (user.role === 'ROLE_STUDENT') {
+        console.log('Компонент монтирован, загружаем решение студента...');
+        await fetchStudentSolution();
+        console.log('Начальное состояние studentSolution:', studentSolution.value);
+      }
+    });
+    const openEdit = () => {
+      if (!task.value) return;
+
+      editTask.value = {
+        title: task.value.title,
+        description: task.value.description,
+        deadline: formatDateForInput(task.value.deadline),
+        priority: task.value.priority,
+        selectedTagIds: task.value.tags ? task.value.tags.map(tag => tag.id || tag) : [],
+        customTags: [],
+        customTag: ''
+      };
+
+      fetchAvailableTags();
+      showEditModal.value = true;
+    };
+
+    const fetchAvailableTags = async () => {
+      try {
+        const response = await api.getAvailableTags();
+        console.log('Полученные теги с бэкенда:', response.data);
+        availableTags.value = response.data;
+      } catch (error) {
+        console.error('Ошибка при загрузке тегов:', error);
+        showToast('Не удалось загрузить список тегов', 'error');
       }
     };
 
@@ -334,7 +949,6 @@ export default {
       }
     };
 
-    // Computed свойства для проверки выбранных элементов
     const isSelectedGroupHasTask = computed(() => {
       return selectedGroupId.value ? groupsWithTask.value.includes(selectedGroupId.value) : false;
     });
@@ -342,16 +956,14 @@ export default {
     const isSelectedStudentHasTask = computed(() => {
       return selectedStudentId.value ? usersWithTask.value.some(u => u.id === selectedStudentId.value) : false;
     });
+
     const getGroupStudentCount = (groupId) => {
       const students = groupStudents.value[groupId];
       return students ? students.length : 0;
     };
 
     const getTagClass = (tag) => {
-      // Получаем имя тега (может быть объектом или строкой)
       const tagName = typeof tag === 'string' ? tag : tag.name || '';
-
-      // Генерируем класс на основе имени тега для разных цветов
       const tagColors = [
         'tag-primary', 'tag-secondary', 'tag-success',
         'tag-warning', 'tag-danger', 'tag-info'
@@ -360,7 +972,6 @@ export default {
       return tagColors[index];
     };
 
-// Получить количество студентов в группе с задачей
     const getGroupStudentsWithTaskCount = (groupId) => {
       const students = groupStudents.value[groupId];
       if (!students) return 0;
@@ -369,7 +980,7 @@ export default {
           usersWithTask.value.some(userWithTask => userWithTask.id === student.id)
       ).length;
     };
-    // Модифицированные методы открытия модальных окон
+
     const assignToOthers = () => {
       selectedGroupId.value = null;
       fetchGroups();
@@ -386,7 +997,6 @@ export default {
     const fetchGroups = async () => {
       groupsLoading.value = true;
       try {
-        const token = localStorage.getItem('jwt-token');
         const response = await api.getGroups();
         groups.value = response.data;
       } catch (error) {
@@ -396,6 +1006,7 @@ export default {
         groupsLoading.value = false;
       }
     };
+
 
     onMounted(fetchTask);
 
@@ -422,17 +1033,6 @@ export default {
       return priorityMap[priority] || priority;
     };
 
-    const updateStatus = async () => {
-      try {
-        const token = localStorage.getItem('jwt-token');
-        await api.updateTaskStatus(route.params.taskId, {status: ''});
-        await fetchTask();
-      } catch (error) {
-        console.error('Ошибка при обновлении статуса:', error);
-        showToast('Не удалось обновить статус', 'error');
-      }
-    };
-
     const confirmAssignment = async () => {
       if (!selectedGroupId.value) {
         showToast('Выберите группу', 'warning');
@@ -442,7 +1042,6 @@ export default {
       assignmentLoading.value = true;
       try {
         await api.assignTaskToGroup(route.params.taskId, selectedGroupId.value, {})
-
         showToast('Задача успешно назначена группе');
         showGroupModal.value = false;
         await fetchTask();
@@ -452,6 +1051,182 @@ export default {
       } finally {
         assignmentLoading.value = false;
       }
+    };
+
+    const closeEditModal = () => {
+      showEditModal.value = false;
+    };
+
+    const filteredAvailableTags = computed(() => {
+      if (!tagSearch.value) {
+        return availableTags.value;
+      }
+      const searchTerm = tagSearch.value.toLowerCase();
+      return availableTags.value.filter(tag =>
+          tag.name.toLowerCase().includes(searchTerm)
+      );
+    });
+
+    const toggleTagSelection = (tagId) => {
+      const index = editTask.value.selectedTagIds.indexOf(tagId);
+      if (index > -1) {
+        editTask.value.selectedTagIds.splice(index, 1);
+      } else {
+        editTask.value.selectedTagIds.push(tagId);
+      }
+    };
+
+    const addCustomTag = () => {
+      const tagName = editTask.value.customTag.trim();
+      if (tagName && !editTask.value.customTags.includes(tagName)) {
+        editTask.value.customTags.push(tagName);
+        editTask.value.customTag = '';
+      }
+    };
+
+    const removeCustomTag = (tagToRemove) => {
+      editTask.value.customTags = editTask.value.customTags.filter(tag => tag !== tagToRemove);
+    };
+
+    const updateTask = async () => {
+      updatingTask.value = true;
+      try {
+        const taskData = {
+          title: editTask.value.title,
+          description: editTask.value.description,
+          deadline: editTask.value.deadline,
+          priority: editTask.value.priority,
+          tagIds: editTask.value.selectedTagIds || [],
+          tagNames: editTask.value.customTags && editTask.value.customTags.length > 0
+              ? editTask.value.customTags
+              : []
+        };
+
+        console.log('Отправляемые данные:', JSON.stringify(taskData, null, 2));
+        await api.updateTask(route.params.taskId, taskData);
+        showToast('Задача успешно обновлена');
+        closeEditModal();
+        await fetchTask();
+      } catch (error) {
+        console.error('Ошибка при обновлении задачи:', error);
+        console.error('Response error:', error.response?.data);
+        showToast('Не удалось обновить задачу', 'error');
+      } finally {
+        updatingTask.value = false;
+      }
+    };
+
+    // Методы для прикрепления файлов
+    const openAttach = () => {
+      showAttachModal.value = true;
+      fetchAttachedFiles();
+    };
+
+    const closeAttachModal = () => {
+      showAttachModal.value = false;
+      selectedFile.value = null;
+    };
+
+    const triggerFileInput = () => {
+      fileInput.value?.click();
+    };
+
+    const handleFileSelect = (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        if (file.size > 10 * 1024 * 1024) {
+          showToast('Файл слишком большой. Максимальный размер: 10MB', 'error');
+          return;
+        }
+        selectedFile.value = file;
+      }
+    };
+
+    const handleFileDrop = (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer.files[0];
+      if (file) {
+        if (file.size > 10 * 1024 * 1024) {
+          showToast('Файл слишком большой. Максимальный размер: 10MB', 'error');
+          return;
+        }
+        selectedFile.value = file;
+      }
+    };
+
+    const removeFile = () => {
+      selectedFile.value = null;
+      if (fileInput.value) {
+        fileInput.value.value = '';
+      }
+    };
+
+    const formatFileSize = (bytes) => {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    // ИСПРАВЛЕННЫЙ МЕТОД ЗАГРУЗКИ ФАЙЛА
+    const uploadFile = async () => {
+      if (!selectedFile.value) return;
+
+      uploadingFile.value = true;
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedFile.value);
+
+        await api.uploadTaskFile(route.params.taskId, formData);
+        showToast('Файл успешно прикреплен');
+        removeFile();
+
+        // ОБНОВЛЯЕМ ФАЙЛЫ В ЗАДАЧЕ И МОДАЛКЕ
+        await fetchTaskFiles(); // Обновляем файлы в основной задаче
+        await fetchAttachedFiles(); // Обновляем файлы в модалке
+
+      } catch (error) {
+        console.error('Ошибка при загрузке файла:', error);
+        showToast('Не удалось прикрепить файл', 'error');
+      } finally {
+        uploadingFile.value = false;
+      }
+    };
+
+    const fetchAttachedFiles = async () => {
+      try {
+        const response = await api.getTaskFiles(route.params.taskId);
+        console.log('Файлы с сервера для модалки:', response.data);
+        attachedFiles.value = response.data.map(file => {
+          console.log('Файл:', file);
+          console.log('URL для скачивания:', file.downloadUrl);
+          return file;
+        });
+      } catch (error) {
+        console.error('Ошибка при загрузке файлов задачи:', error);
+      }
+    };
+
+    // ИСПРАВЛЕННЫЙ МЕТОД УДАЛЕНИЯ ФАЙЛА
+    const deleteFile = async (fileId) => {
+      try {
+        await api.deleteTaskFile(route.params.taskId, fileId);
+        showToast('Файл удален');
+
+        // ОБНОВЛЯЕМ ФАЙЛЫ В ЗАДАЧЕ И МОДАЛКЕ
+        await fetchTaskFiles(); // Обновляем файлы в основной задаче
+        await fetchAttachedFiles(); // Обновляем файлы в модалке
+
+      } catch (error) {
+        console.error('Ошибка при удалении файла:', error);
+        showToast('Не удалось удалить файл', 'error');
+      }
+    };
+
+    const formatDateForInput = (dateString) => {
+      const date = new Date(dateString);
+      return date.toISOString().slice(0, 16);
     };
 
     const backToTasks = () => {
@@ -470,10 +1245,7 @@ export default {
       studentsLoading.value = true;
       studentsError.value = null;
       try {
-        const token = localStorage.getItem('jwt-token');
         const response = await api.getMyUsers()
-
-        // Проверяем структуру ответа
         if (Array.isArray(response.data)) {
           students.value = response.data;
         } else if (response.data?.students) {
@@ -492,14 +1264,12 @@ export default {
 
     const filteredStudents = computed(() => {
       if (!studentSearch.value) return students.value;
-
       const search = studentSearch.value.toLowerCase();
       return students.value.filter(student =>
           student.name.toLowerCase().includes(search) ||
           student.email.toLowerCase().includes(search)
       );
     });
-
 
     const confirmStudentAssignment = async () => {
       if (!selectedStudentId.value) {
@@ -512,7 +1282,7 @@ export default {
         await api.assignTaskToUser(route.params.taskId, selectedStudentId.value, {})
         showToast('Задача успешно назначена студенту!');
         showStudentModal.value = false;
-        await fetchTask(); // Обновляем данные задачи
+        await fetchTask();
       } catch (error) {
         console.error('Ошибка при назначении задачи:', error);
         showToast(`Ошибка: ${error.response?.data?.message || error.message}`, 'error');
@@ -527,8 +1297,22 @@ export default {
       return parts.map(part => part[0]).join('').toUpperCase();
     };
 
+    const downloadFileDirect = async (fileId, fileName) => {
+      try {
+        const response = await api.getFileDownloadUrl(route.params.taskId, fileId);
+        const downloadUrl = response.data;
+        if (downloadUrl) {
+          window.open(downloadUrl, '_blank');
+        }
+      } catch (error) {
+        console.error('Ошибка при получении ссылки для скачивания:', error);
+        showToast('Не удалось получить ссылку для скачивания', 'error');
+      }
+    };
+
     return {
       task,
+      deleteStudentSolution,
       loading,
       user,
       showGroupModal,
@@ -539,8 +1323,6 @@ export default {
       formatDate,
       getStatusText,
       getPriorityText,
-      updateStatus,
-      assignToOthers,
       confirmAssignment,
       openDeleteConfirm,
       confirmDeleteTask,
@@ -559,17 +1341,59 @@ export default {
       confirmStudentAssignment,
       getInitials,
       backToTasks,
+      downloadFileDirect,
       toast,
       hideToast,
-
       usersWithTask,
       groupsWithTask,
       isSelectedGroupHasTask,
       isSelectedStudentHasTask,
+      solutionsLoading,
       selectGroup,
       selectStudent,
       getGroupStudentCount,
-      getGroupStudentsWithTaskCount
+      getGroupStudentsWithTaskCount,
+      assignToOthers,
+      showEditModal,
+      showAttachModal,
+      editTask,
+      selectedFile,
+      fileInput,
+      uploadingFile,
+      attachedFiles,
+      filteredAvailableTags,
+      openEdit,
+      closeEditModal,
+      toggleTagSelection,
+      addCustomTag,
+      removeCustomTag,
+      updateTask,
+      openAttach,
+      closeAttachModal,
+      triggerFileInput,
+      handleFileSelect,
+      handleFileDrop,
+      removeFile,
+      formatFileSize,
+      uploadFile,
+      deleteFile,
+      formatDateForInput,
+      availableTags,
+      tagSearch,
+      updatingTask,
+      uploadStudentSolution,
+      handleSolutionFileDrop,
+      handleSolutionFileSelect,
+      triggerSolutionFileInput,
+      updateGrade,
+      downloadStudentSolution,
+      openSolutionsModal,
+      showSolutionsModal,
+      studentSolution,
+      selectedSolutionFile,
+      removeSolutionFile,
+      uploadingSolution,
+      solutions
     };
   }
 };
@@ -854,6 +1678,20 @@ export default {
 
 .action-btn.delete:hover {
   background-color: #C82333;
+}
+
+.action-btn.attach {
+  background-color: #5f9827;
+}
+.action-btn.attach:hover {
+  background-color: #548522;
+}
+
+.action-btn.change {
+  background-color: #a69b91;
+}
+.action-btn.change:hover {
+  background-color: #867c75;
 }
 
 /* Общие стили статусов и приоритетов */
@@ -1155,5 +1993,624 @@ export default {
   border: 1px solid #ddd;
   box-shadow: none;
   animation: none;
+}
+/* Стили для больших модальных окон */
+.large-modal {
+  width: 600px;
+  max-width: 95%;
+}
+
+/* Стили для загрузки файлов */
+.file-upload-section {
+  margin: 20px 0;
+}
+
+.file-dropzone {
+  border: 2px dashed #ddd;
+  border-radius: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background-color: #fafafa;
+}
+
+.file-dropzone:hover {
+  border-color: #4CAF50;
+  background-color: #f0fff0;
+}
+
+.dropzone-content {
+  color: #666;
+}
+
+.upload-icon {
+  font-size: 2em;
+  display: block;
+  margin-bottom: 10px;
+}
+
+.file-preview {
+  margin-top: 15px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-name {
+  font-weight: 500;
+}
+
+.file-size {
+  color: #666;
+  font-size: 0.9em;
+}
+
+.remove-file-btn {
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 0.8em;
+}
+
+/* Стили для списка прикрепленных файлов */
+.attached-files-list,
+.attached-files {
+  margin: 20px 0;
+}
+
+.attached-files h4 {
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.file-item,
+.attached-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  margin-bottom: 5px;
+}
+
+.file-icon {
+  font-size: 1.2em;
+}
+
+.download-link,
+.download-btn {
+  color: #007bff;
+  text-decoration: none;
+  font-size: 0.9em;
+}
+
+.download-link:hover,
+.download-btn:hover {
+  text-decoration: underline;
+}
+
+.delete-file-btn {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.8em;
+  margin-left: auto;
+}
+
+/* Стили для форм */
+.form-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.student-task-solution-section {
+  border-top: 2px solid #4CAF50;
+  margin-top: 30px;
+  padding-top: 20px;
+  position: relative;
+}
+
+.student-task-solution-section::before {
+  content: "Решение задачи";
+  position: absolute;
+  top: -12px;
+  left: 20px;
+  background: white;
+  padding: 0 15px;
+  color: #4CAF50;
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.solutions-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.solution-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 15px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: #fafafa;
+}
+
+.student-info {
+  display: flex;
+  align-items: flex-start;
+  flex: 1;
+}
+
+.student-details {
+  margin-left: 15px;
+}
+
+.student-details h4 {
+  margin: 0 0 8px 0;
+  color: #333;
+}
+
+.solution-file, .no-solution {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9em;
+}
+
+.no-solution-text {
+  color: #666;
+  font-style: italic;
+}
+
+.grading-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 200px;
+}
+
+.grade-input, .comment-input {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.grade-field {
+  width: 80px;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.comment-field {
+  width: 200px;
+  height: 60px;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  resize: vertical;
+  font-size: 0.9em;
+}
+
+/* Стили для студента */
+.current-solution {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+}
+
+.grade-info {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #dee2e6;
+}
+
+.grade-item, .comment-item {
+  display: flex;
+  margin-bottom: 8px;
+}
+
+.grade-item .label, .comment-item .label {
+  font-weight: bold;
+  min-width: 100px;
+}
+
+.grade-value {
+  color: #28a745;
+  font-weight: bold;
+}
+
+.comment-value {
+  color: #666;
+  font-style: italic;
+}
+
+.upload-solution {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  border: 2px dashed #dee2e6;
+}
+
+/* Кнопка просмотра решений */
+.action-btn.solutions {
+  background-color: #9C27B0;
+}
+
+.action-btn.solutions:hover {
+  background-color: #7B1FA2;
+}
+/* Стили для блока решения студента */
+.student-solution-section {
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 20px 0;
+  border: 1px solid #e9ecef;
+}
+
+.solution-header h3 {
+  margin: 0 0 8px 0;
+  color: #2c3e50;
+  font-size: 1.4em;
+}
+
+.solution-description {
+  color: #6c757d;
+  margin: 0;
+  font-size: 0.95em;
+}
+
+/* Состояние: решение загружено */
+.solution-uploaded {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  border: 1px solid #d1ecf1;
+}
+
+.uploaded-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.uploaded-header h4 {
+  margin: 0;
+  color: #28a745;
+}
+
+.upload-date {
+  color: #6c757d;
+  font-size: 0.9em;
+}
+
+.solution-file-card {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.file-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.file-icon-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.file-icon {
+  font-size: 1.5em;
+}
+
+.file-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-name {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.file-size {
+  color: #6c757d;
+  font-size: 0.85em;
+}
+
+.file-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.download-btn {
+  background: #007bff;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 0.9em;
+  transition: background-color 0.2s;
+}
+
+.download-btn:hover {
+  background: #0056b3;
+}
+
+.delete-btn {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.2s;
+}
+
+.delete-btn:hover {
+  background: #c82333;
+}
+
+/* Обратная связь преподавателя */
+.teacher-feedback {
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.teacher-feedback h5 {
+  margin: 0 0 12px 0;
+  color: #856404;
+}
+
+.grade-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  padding: 8px 12px;
+  border-radius: 20px;
+  margin-bottom: 12px;
+}
+
+.grade-label {
+  color: #6c757d;
+  font-size: 0.9em;
+}
+
+.grade-value {
+  color: #28a745;
+  font-weight: bold;
+  font-size: 1.1em;
+}
+
+.comment-box {
+  background: white;
+  padding: 12px;
+  border-radius: 6px;
+  border-left: 4px solid #17a2b8;
+}
+
+.comment-label {
+  display: block;
+  color: #6c757d;
+  font-size: 0.9em;
+  margin-bottom: 4px;
+}
+
+.comment-text {
+  margin: 0;
+  color: #2c3e50;
+  line-height: 1.4;
+}
+
+.waiting-feedback {
+  text-align: center;
+  padding: 20px;
+  color: #6c757d;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+/* Состояние: загрузка решения */
+.solution-upload {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.upload-area {
+  margin-bottom: 20px;
+}
+
+.upload-zone {
+  border: 2px dashed #dee2e6;
+  border-radius: 12px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: #fafafa;
+  margin-bottom: 16px;
+}
+
+.upload-zone:hover {
+  border-color: #007bff;
+  background: #f0f8ff;
+  transform: translateY(-2px);
+}
+
+.upload-content h4 {
+  margin: 0 0 8px 0;
+  color: #2c3e50;
+}
+
+.upload-content p {
+  margin: 0 0 12px 0;
+  color: #6c757d;
+}
+
+.upload-icon {
+  font-size: 3em;
+  margin-bottom: 12px;
+}
+
+.upload-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.upload-hint small {
+  color: #868e96;
+}
+
+/* Предпросмотр файла */
+.file-preview-card {
+  background: #e7f3ff;
+  border: 1px solid #b3d9ff;
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #d1ecf1;
+  border-bottom: 1px solid #bee5eb;
+}
+
+.preview-title {
+  font-weight: 600;
+  color: #0c5460;
+}
+
+.remove-preview-btn {
+  background: none;
+  border: none;
+  font-size: 1.2em;
+  cursor: pointer;
+  color: #dc3545;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.remove-preview-btn:hover {
+  background: #f8d7da;
+}
+
+.preview-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Кнопка отправки */
+.upload-submit-btn {
+  width: 100%;
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 1em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.upload-submit-btn:hover:not(:disabled) {
+  background: #218838;
+  transform: translateY(-1px);
+}
+
+.upload-submit-btn:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.upload-submit-btn.loading {
+  background: #ffc107;
+  color: #856404;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+  .student-solution-section {
+    padding: 16px;
+  }
+
+  .file-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .file-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .uploaded-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}
+.no-solutions {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+  font-style: italic;
+}
+/* Адаптивность */
+@media (max-width: 768px) {
+  .large-modal {
+    width: 95%;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .file-item,
+  .attached-file {
+    flex-wrap: wrap;
+  }
 }
 </style>

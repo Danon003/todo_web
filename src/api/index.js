@@ -13,6 +13,9 @@ api.interceptors.request.use(config => {
     if (token) {
         config.headers.Authorization = `Bearer ${token}`
     }
+    if (config.data instanceof FormData) {
+        delete config.headers['Content-Type']
+    }
     return config
 })
 
@@ -72,6 +75,47 @@ export default {
     // Создать новый тег
     createTag (tagData) {
         return api.post('/tags', {tagData});
+    },
+
+    updateTask (taskId, taskData) {
+        return api.put(`/task/${taskId}`, taskData)
+    },
+
+    uploadTaskFile (taskId, formData) {
+        return api.post(`/minio/tasks/${taskId}/files`, formData)
+    },
+    getTaskFiles (taskId) {
+        return api.get(`/minio/tasks/${taskId}/files`)
+    },
+    deleteTaskFile (taskId, fileId) {
+        return api.delete(`/minio/tasks/${taskId}/files/${fileId}`)
+    },
+    getFileDownloadUrl(taskId, fileId) {
+        return api.get(`/minio/tasks/${taskId}/files/${fileId}/download`)
+    },
+
+    // Solutions API
+     getTaskSolutions (taskId) {
+         return api.get(`/minio/tasks/${taskId}/solution/all`)
+     },
+     downloadStudentSolution (taskId, studentId) {
+         return api.get(`/minio/tasks/${taskId}/solution/${studentId}/download`)
+     },
+     gradeSolution (taskId, studentId, data) {
+         return api.put(`/minio/tasks/${taskId}/solution/${studentId}/grade`, data)
+     },
+    getStudentSolution(taskId) {
+        return api.get(`/minio/tasks/${taskId}/solution`)
+    },
+
+// Student solutions API
+    uploadStudentSolution (taskId, formData) {
+        return api.post(`/minio/tasks/${taskId}/solution`, formData, {
+            headers: {'Content-Type': 'multipart/form-data'}
+        })
+    },
+    deleteStudentSolution (taskId) {
+        return api.delete(`/minio/tasks/${taskId}/solution`);
     },
 
     // Groups
@@ -183,4 +227,7 @@ export default {
     }),
 
 
+    getStudentSolutionDownloadUrl(taskId) {
+        return api.get(`/minio/tasks/${taskId}/solution/download`)
+    }
 }
