@@ -30,6 +30,13 @@ export default {
     register(userData) {
         return api.post('/auth/registration', userData)
     },
+    forgotPassword (email)  {
+        return api.post('/auth/forgot-password', {email} )
+    },
+
+    resetPassword (data)  {
+        return api.post('/auth/reset-password', data)
+    },
 
     // Tasks
     getTasks() {
@@ -209,6 +216,7 @@ export default {
     getCommentReplies (taskId, commentId) {
         return api.get(`/task/${taskId}/comments/${commentId}/replies`)
     },
+
 
     getNotification: (params) => axios.get(`${NOTIFICATION_API}/notifications`, {
         params: {

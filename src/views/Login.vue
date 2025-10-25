@@ -1,42 +1,149 @@
 <template>
   <div class="login-container">
     <div class="login-form">
-      <h2>Вход в систему</h2>
-      <form @submit.prevent="handleLogin">
-        <div class="form-group">
-          <label for="username">Логин:</label>
-          <input
-              id="username"
-              v-model="loginForm.username"
-              type="text"
-              required
-              class="form-input"
+      <!-- Форма входа -->
+      <div v-if="!showForgotPassword && !showResetPassword">
+        <h2>Вход в систему</h2>
+        <form @submit.prevent="handleLogin">
+          <div class="form-group">
+            <label for="username">Логин:</label>
+            <input
+                id="username"
+                v-model="loginForm.username"
+                type="text"
+                required
+                class="form-input"
+                :disabled="loading"
+            />
+          </div>
+          <div class="form-group">
+            <label for="password">Пароль:</label>
+            <input
+                id="password"
+                v-model="loginForm.password"
+                type="password"
+                required
+                class="form-input"
+                :disabled="loading"
+            />
+          </div>
+          <button
+              type="submit"
+              class="submit-btn"
               :disabled="loading"
-          />
-        </div>
-        <div class="form-group">
-          <label for="password">Пароль:</label>
-          <input
-              id="password"
-              v-model="loginForm.password"
-              type="password"
-              required
-              class="form-input"
-              :disabled="loading"
-          />
-        </div>
-        <button
-            type="submit"
-            class="submit-btn"
-            :disabled="loading"
-        >
-          <span v-if="loading">Вход...</span>
-          <span v-else>Войти</span>
-        </button>
-      </form>
-      <p class="auth-link">Нет аккаунта? <router-link to="/register">Зарегистрируйтесь</router-link></p>
+          >
+            <span v-if="loading">Вход...</span>
+            <span v-else>Войти</span>
+          </button>
+        </form>
 
-      <!-- Блок для отображения ошибок -->
+        <div class="auth-links">
+          <p class="auth-link">Нет аккаунта? <router-link to="/register">Зарегистрируйтесь</router-link></p>
+          <p class="auth-link">
+            <a href="#" @click.prevent="showForgotPassword = true" class="forgot-password-link">
+              Забыли пароль?
+            </a>
+          </p>
+        </div>
+      </div>
+
+      <!-- Форма восстановления пароля -->
+      <div v-if="showForgotPassword && !showResetPassword" class="forgot-password-form">
+        <div class="form-header">
+          <button type="button" @click="backToLogin" class="back-btn">← Назад</button>
+          <h2>Восстановление пароля</h2>
+        </div>
+
+        <form @submit.prevent="sendResetCode">
+          <div class="form-group">
+            <label for="email">Email:</label>
+            <input
+                id="email"
+                v-model="forgotPasswordForm.email"
+                type="email"
+                required
+                class="form-input"
+                :disabled="loading"
+                placeholder="Введите email, указанный при регистрации"
+            />
+          </div>
+          <button
+              type="submit"
+              class="submit-btn"
+              :disabled="loading"
+          >
+            <span v-if="loading">Отправка...</span>
+            <span v-else>Отправить код</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Форма сброса пароля -->
+      <div v-if="showResetPassword" class="reset-password-form">
+        <div class="form-header">
+          <button type="button" @click="backToForgotPassword" class="back-btn">← Назад</button>
+          <h2>Создание нового пароля</h2>
+        </div>
+
+        <form @submit.prevent="resetPassword">
+          <div class="form-group">
+            <label for="resetCode">Код подтверждения:</label>
+            <input
+                id="resetCode"
+                v-model="resetPasswordForm.code"
+                type="text"
+                required
+                class="form-input"
+                :disabled="loading"
+                placeholder="Введите код из письма"
+            />
+          </div>
+          <div class="form-group">
+            <label for="newPassword">Новый пароль:</label>
+            <input
+                id="newPassword"
+                v-model="resetPasswordForm.newPassword"
+                type="password"
+                required
+                class="form-input"
+                :disabled="loading"
+                placeholder="Введите новый пароль"
+                minlength="6"
+            />
+            <div class="password-hint">
+              Пароль должен содержать минимум 6 символов
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="confirmPassword">Подтвердите пароль:</label>
+            <input
+                id="confirmPassword"
+                v-model="resetPasswordForm.confirmPassword"
+                type="password"
+                required
+                class="form-input"
+                :disabled="loading"
+                placeholder="Повторите новый пароль"
+            />
+            <div v-if="passwordMismatch" class="error-text">
+              Пароли не совпадают
+            </div>
+          </div>
+          <button
+              type="submit"
+              class="submit-btn"
+              :disabled="loading || passwordMismatch"
+          >
+            <span v-if="loading">Сброс...</span>
+            <span v-else>Сбросить пароль</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Блок для отображения сообщений -->
+      <div v-if="message" class="success-message">
+        {{ message }}
+      </div>
       <div v-if="error" class="error-message">
         {{ error }}
       </div>
@@ -45,23 +152,52 @@
 </template>
 
 <script>
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api'
-import {ref} from "vue";
 
 export default {
   name: 'Login',
   setup() {
     const router = useRouter()
+
+    // Состояния для переключения между формами
+    const showForgotPassword = ref(false)
+    const showResetPassword = ref(false)
+
+    // Форма входа
     const loginForm = ref({
       username: '',
       password: ''
     })
-    const error = ref('')
-    const loading = ref(false)
 
+    // Форма восстановления пароля
+    const forgotPasswordForm = ref({
+      email: ''
+    })
+
+    // Форма сброса пароля
+    const resetPasswordForm = ref({
+      code: '',
+      newPassword: '',
+      confirmPassword: ''
+    })
+
+    const loading = ref(false)
+    const error = ref('')
+    const message = ref('')
+
+    // Проверка совпадения паролей
+    const passwordMismatch = computed(() => {
+      return resetPasswordForm.value.newPassword !== '' &&
+          resetPasswordForm.value.confirmPassword !== '' &&
+          resetPasswordForm.value.newPassword !== resetPasswordForm.value.confirmPassword
+    })
+
+    // Метод входа
     const handleLogin = async () => {
       error.value = ''
+      message.value = ''
       loading.value = true
 
       try {
@@ -72,54 +208,136 @@ export default {
 
         console.log('Login response:', response)
 
-        // Проверяем наличие токена в ответе
         if (response.data && response.data['jwt-token']) {
           localStorage.setItem('jwt-token', response.data['jwt-token']);
           await router.push('/');
         } else {
-          // Если токена нет, но ответ успешный - что-то пошло не так
           throw new Error('Не удалось получить токен авторизации')
         }
 
       } catch (err) {
         console.error('Login error:', err)
-
-        // Обрабатываем ошибку от сервера
-        if (err.response && err.response.data) {
-          // Сервер вернул ошибку в формате { "message": "Incorrect credentials!" }
-          if (err.response.data.message === 'Incorrect credentials!') {
-            error.value = 'Неверный логин или пароль'
-          } else if (err.response.data.message) {
-            error.value = err.response.data.message
-          } else {
-            error.value = 'Произошла ошибка при входе'
-          }
-        } else if (err.response) {
-          // HTTP ошибка без тела ответа
-          if (err.response.status === 401) {
-            error.value = 'Неверный логин или пароль'
-          } else if (err.response.status === 400) {
-            error.value = 'Некорректные данные'
-          } else {
-            error.value = `Ошибка сервера: ${err.response.status}`
-          }
-        } else if (err.request) {
-          // Запрос был сделан, но ответ не получен
-          error.value = 'Не удалось подключиться к серверу'
-        } else {
-          // Другие ошибки
-          error.value = err.message || 'Произошла ошибка при входе'
-        }
+        handleError(err)
       } finally {
         loading.value = false
       }
     }
 
+    // Метод отправки кода восстановления
+    const sendResetCode = async () => {
+      error.value = ''
+      message.value = ''
+      loading.value = true
+
+      try {
+        await api.forgotPassword(forgotPasswordForm.value.email)
+
+        message.value = 'Код подтверждения отправлен на ваш email'
+        showResetPassword.value = true
+      } catch (err) {
+        console.error('Forgot password error:', err)
+        handleError(err)
+      } finally {
+        loading.value = false
+      }
+    }
+
+    // Метод сброса пароля
+    const resetPassword = async () => {
+      if (passwordMismatch.value) {
+        error.value = 'Пароли не совпадают'
+        return
+      }
+
+      error.value = ''
+      message.value = ''
+      loading.value = true
+
+      try {
+        await api.resetPassword({
+          email: forgotPasswordForm.value.email,
+          code: resetPasswordForm.value.code,
+          newPassword: resetPasswordForm.value.newPassword
+        })
+
+        message.value = 'Пароль успешно изменен! Теперь вы можете войти с новым паролем.'
+
+        // Возвращаемся к форме входа через 3 секунды
+        setTimeout(() => {
+          backToLogin()
+        }, 3000)
+      } catch (err) {
+        console.error('Reset password error:', err)
+        handleError(err)
+      } finally {
+        loading.value = false
+      }
+    }
+
+    // Обработка ошибок
+    const handleError = (err) => {
+      if (err.response && err.response.data) {
+        if (err.response.data.message === 'Incorrect credentials!') {
+          error.value = 'Неверный логин или пароль'
+        } else if (err.response.data.message) {
+          error.value = err.response.data.message
+        } else {
+          error.value = 'Произошла ошибка'
+        }
+      } else if (err.response) {
+        if (err.response.status === 401) {
+          error.value = 'Неверный логин или пароль'
+        } else if (err.response.status === 400) {
+          error.value = 'Некорректные данные'
+        } else {
+          error.value = `Ошибка сервера: ${err.response.status}`
+        }
+      } else if (err.request) {
+        error.value = 'Не удалось подключиться к серверу'
+      } else {
+        error.value = err.message || 'Произошла ошибка'
+      }
+    }
+
+    // Навигация между формами
+    const backToLogin = () => {
+      showForgotPassword.value = false
+      showResetPassword.value = false
+      error.value = ''
+      message.value = ''
+      forgotPasswordForm.value.email = ''
+      resetPasswordForm.value.code = ''
+      resetPasswordForm.value.newPassword = ''
+      resetPasswordForm.value.confirmPassword = ''
+    }
+
+    const backToForgotPassword = () => {
+      showResetPassword.value = false
+      error.value = ''
+      message.value = ''
+      resetPasswordForm.value.code = ''
+      resetPasswordForm.value.newPassword = ''
+      resetPasswordForm.value.confirmPassword = ''
+    }
+
     return {
+      // Состояния
+      showForgotPassword,
+      showResetPassword,
       loginForm,
-      error,
+      forgotPasswordForm,
+      resetPasswordForm,
       loading,
-      handleLogin
+      error,
+      message,
+      passwordMismatch,
+
+      // Методы
+      handleLogin,
+      sendResetCode,
+      resetPassword,
+      backToLogin,
+      backToForgotPassword
     }
   }
 }
@@ -154,6 +372,33 @@ h2 {
   font-size: clamp(1.5rem, 4vw, 2.5rem);
 }
 
+.form-header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 2rem;
+}
+
+.form-header h2 {
+  margin: 0;
+  text-align: left;
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  color: #4CAF50;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  transition: background-color 0.3s;
+}
+
+.back-btn:hover {
+  background-color: #f5f5f5;
+}
+
 .form-group {
   margin-bottom: 1.8rem;
 }
@@ -182,6 +427,18 @@ label {
 .form-input:disabled {
   background-color: #f5f5f5;
   cursor: not-allowed;
+}
+
+.password-hint {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0.5rem;
+}
+
+.error-text {
+  font-size: 0.85rem;
+  color: #e74c3c;
+  margin-top: 0.5rem;
 }
 
 .submit-btn {
@@ -215,9 +472,13 @@ label {
   box-shadow: none;
 }
 
+.auth-links {
+  margin-top: 1.5rem;
+}
+
 .auth-link {
   text-align: center;
-  margin-top: 20px;
+  margin: 0.5rem 0;
   color: #666;
   font-size: 15px;
 }
@@ -230,6 +491,21 @@ label {
 
 .auth-link a:hover {
   text-decoration: underline;
+}
+
+.forgot-password-link {
+  color: #4CAF50 !important;
+}
+
+.success-message {
+  font-size: clamp(0.9rem, 2vw, 1.1rem);
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background-color: #e8f5e8;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
+  border-radius: 0.5rem;
+  text-align: center;
 }
 
 .error-message {
@@ -262,6 +538,16 @@ label {
   .login-form {
     border-radius: 0;
     height: 100vh;
+  }
+
+  .form-header {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
+
+  .form-header h2 {
+    text-align: center;
   }
 }
 </style>
