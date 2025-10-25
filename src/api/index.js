@@ -194,6 +194,21 @@ export default {
         return api.get('/admin/statistic');
     },
 
+    getTaskComments (taskId) {
+        return api.get(`/task/${taskId}/comments`)
+    },
+    createComment (taskId, commentData) {
+        return api.post(`/task/${taskId}/comments`, commentData)
+    },
+    updateComment (taskId, commentId, content) {
+        return api.put(`/task/${taskId}/comments/${commentId}`, {content})
+    },
+    deleteComment (taskId, commentId) {
+        return api.delete(`/task/${taskId}/comments/${commentId}`)
+    },
+    getCommentReplies (taskId, commentId) {
+        return api.get(`/task/${taskId}/comments/${commentId}/replies`)
+    },
 
     getNotification: (params) => axios.get(`${NOTIFICATION_API}/notifications`, {
         params: {

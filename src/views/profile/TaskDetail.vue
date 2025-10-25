@@ -18,6 +18,17 @@
       </div>
     </div>
 
+    <div v-if="showDeleteCommentConfirm" class="modal">
+      <div class="modal-content">
+        <h3>Подтверждение удаления</h3>
+        <p>Вы уверены, что хотите удалить этот комментарий?</p>
+        <div class="modal-actions">
+          <button @click="confirmDeleteComment" class="delete-btn">Удалить</button>
+          <button @click="cancelDeleteComment" class="cancel-btn">Отмена</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Модальное окно редактирования задачи -->
     <div v-if="showEditModal" class="modal">
       <div class="modal-content large-modal">
@@ -206,6 +217,7 @@
             <span class="value">{{ task.files.length }}</span>
           </div>
         </div>
+
         <!-- Прикрепленные файлы - ОСНОВНОЙ БЛОК -->
         <div v-if="task.files && task.files.length > 0" class="attached-files-list">
           <h4>Прикрепленные файлы:</h4>
@@ -223,6 +235,7 @@
           </div>
         </div>
 
+        <!-- Модальное окно решений студентов -->
         <div v-if="showSolutionsModal" class="modal">
           <div class="modal-content large-modal">
             <span class="close" @click="showSolutionsModal = false">&times;</span>
@@ -280,7 +293,7 @@
           </div>
         </div>
 
-        <!-- блок для студента -->
+        <!-- Блок для студента -->
         <div v-if="user.role === 'ROLE_STUDENT'" class="student-solution-section">
           <div class="solution-header">
             <h3>📝 Решение задачи</h3>
@@ -385,16 +398,12 @@
                 :disabled="!selectedSolutionFile || uploadingSolution"
                 :class="{ 'loading': uploadingSolution }"
             >
-      <span v-if="uploadingSolution">
-        ⏳ Загрузка...
-      </span>
-              <span v-else>
-        ✅ Отправить решение
-      </span>
+              <span v-if="uploadingSolution">⏳ Загрузка...</span>
+              <span v-else>✅ Отправить решение</span>
             </button>
           </div>
         </div>
-        
+
         <div class="task-actions">
           <button v-if="user.role === 'ROLE_TEACHER'"
                   @click="assignToOthers"
@@ -433,6 +442,149 @@
       Задача не найдена
     </div>
 
+        <!-- Блок комментариев -->
+        <div class="comments-section">
+          <div class="comments-header">
+            <h3>💬 Комментарии</h3>
+            <span class="comments-count" v-if="comments.length > 0">
+      {{ comments.length }} {{ getCommentWord(comments.length) }}
+    </span>
+          </div>
+
+          <!-- Список комментариев -->
+          <div class="comments-list" v-if="comments.length > 0">
+            <div v-for="comment in comments" :key="comment.id" class="comment-item">
+              <div class="comment-avatar">
+                {{ getInitials(comment.authorName) }}
+              </div>
+              <div class="comment-content">
+                <div class="comment-header">
+                  <span class="comment-author">{{ comment.authorName }}</span>
+                  <span class="comment-role" :class="'role-' + comment.authorRole.toLowerCase()">
+            {{ getRoleText(comment.authorRole) }}
+          </span>
+                  <span class="comment-time">{{ formatCommentTime(comment.createdAt) }}</span>
+
+                  <!-- Действия с комментарием -->
+                  <div class="comment-actions" v-if="canEditComment(comment)">
+                    <button
+                        v-if="isCommentAuthor(comment)"
+                        @click="startEditComment(comment)"
+                        class="comment-edit-btn"
+                        title="Редактировать"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                        @click="openDeleteCommentConfirm(comment)"
+                        class="comment-delete-btn"
+                        :title="isCommentAuthor(comment) ? 'Удалить' : 'Удалить комментарий'"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Редактирование комментария -->
+                <div v-if="editingCommentId === comment.id" class="comment-edit">
+          <textarea
+              v-model="editCommentText"
+              class="comment-edit-input"
+              rows="3"
+              placeholder="Введите текст комментария..."
+          ></textarea>
+                  <div class="comment-edit-actions">
+                    <button @click="saveCommentEdit(comment.id)" class="save-btn">💾 Сохранить</button>
+                    <button @click="cancelEdit" class="cancel-btn">❌ Отмена</button>
+                  </div>
+                </div>
+
+                <!-- Отображение комментария -->
+                <div v-else class="comment-text">
+                  {{ comment.content }}
+                </div>
+
+                <!-- Счетчик ответов -->
+                <div v-if="comment.repliesCount > 0" class="comment-replies-info">
+                  <span class="replies-count">{{ comment.repliesCount }} {{ getReplyWord(comment.repliesCount) }}</span>
+                  <button @click="toggleReplies(comment.id)" class="show-replies-btn">
+                    {{ showReplies[comment.id] ? 'Скрыть' : 'Показать' }}
+                  </button>
+                </div>
+
+                <!-- Ответы на комментарий -->
+                <div v-if="showReplies[comment.id] && commentReplies[comment.id]" class="comment-replies">
+                  <div
+                      v-for="reply in commentReplies[comment.id]"
+                      :key="reply.id"
+                      class="comment-reply"
+                  >
+                    <div class="reply-avatar">
+                      {{ getInitials(reply.authorName) }}
+                    </div>
+                    <div class="reply-content">
+                      <div class="reply-header">
+                        <span class="reply-author">{{ reply.authorName }}</span>
+                        <span class="reply-role" :class="'role-' + reply.authorRole.toLowerCase()">
+                  {{ getRoleText(reply.authorRole) }}
+                </span>
+                        <span class="reply-time">{{ formatCommentTime(reply.createdAt) }}</span>
+
+                        <div class="reply-actions" v-if="canEditComment(reply)">
+                          <button
+                              v-if="isCommentAuthor(reply)"
+                              @click="startEditComment(reply)"
+                              class="comment-edit-btn"
+                              title="Редактировать"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                              @click="openDeleteCommentConfirm(reply)"
+                              class="comment-delete-btn"
+                              :title="isCommentAuthor(reply) ? 'Удалить' : 'Удалить комментарий'"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                      <div class="reply-text">{{ reply.content }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Сообщение об отсутствии комментариев -->
+          <div v-else class="no-comments">
+            <p>Пока нет комментариев. Будьте первым!</p>
+          </div>
+
+          <!-- Форма добавления комментария -->
+          <div class="add-comment">
+            <div class="comment-input-container">
+      <textarea
+          v-model="newCommentText"
+          class="comment-input"
+          placeholder="Напишите комментарий..."
+          rows="3"
+          @keydown.ctrl.enter="addComment"
+      ></textarea>
+              <div class="comment-input-hint">
+                Ctrl + Enter для отправки
+              </div>
+            </div>
+            <button
+                @click="addComment"
+                class="send-comment-btn"
+                :disabled="!newCommentText.trim() || addingComment"
+            >
+              {{ addingComment ? '⏳ Отправка...' : '📤 Отправить' }}
+            </button>
+          </div>
+        </div>
+
     <!-- Модальное окно выбора группы -->
     <div v-if="showGroupModal" class="modal">
       <div class="modal-content">
@@ -447,9 +599,9 @@
                 :key="group.id"
                 class="group-item"
                 :class="{
-        selected: selectedGroupId === group.id,
-        'has-task': groupsWithTask.includes(group.id)
-      }"
+                  selected: selectedGroupId === group.id,
+                  'has-task': groupsWithTask.includes(group.id)
+                }"
                 @click="selectGroup(group)"
             >
               <div class="group-avatar">
@@ -564,16 +716,53 @@ export default {
     const selectedSolutionFile = ref(null);
     const solutionFileInput = ref(null);
     const uploadingSolution = ref(false);
-
-    // Переменные для уведомлений
     const toast = ref({
       show: false,
       message: '',
       type: 'success'
     });
-
-    // Переменные для подтверждения удаления
     const showDeleteConfirm = ref(false);
+    const usersWithTask = ref([]);
+    const groupsWithTask = ref([]);
+    const usersWithTaskLoading = ref(false);
+    const groupStudents = ref({});
+    const showGroupModal = ref(false);
+    const selectedGroupId = ref(null);
+    const groups = ref([]);
+    const groupsLoading = ref(false);
+    const assignmentLoading = ref(false);
+    const showEditModal = ref(false);
+    const editTask = ref({
+      title: '',
+      description: '',
+      deadline: '',
+      priority: 'MEDIUM',
+      selectedTagIds: [],
+      customTags: [],
+      customTag: ''
+    });
+    const showAttachModal = ref(false);
+    const selectedFile = ref(null);
+    const fileInput = ref(null);
+    const uploadingFile = ref(false);
+    const attachedFiles = ref([]);
+    const showStudentModal = ref(false);
+    const students = ref([]);
+    const studentsLoading = ref(false);
+    const studentsError = ref(null);
+    const studentSearch = ref('');
+    const selectedStudentId = ref(null);
+    const studentAssignmentLoading = ref(false);
+    const comments = ref([]);
+    const commentsLoading = ref(false);
+    const newCommentText = ref('');
+    const addingComment = ref(false);
+    const editingCommentId = ref(null);
+    const editCommentText = ref('');
+    const showReplies = ref({});
+    const commentReplies = ref({});
+    const showDeleteCommentConfirm = ref(false);
+    const commentToDelete = ref(null);
 
     const showToast = (message, type = 'success') => {
       toast.value = {
@@ -581,7 +770,6 @@ export default {
         message,
         type
       };
-
       setTimeout(() => {
         hideToast();
       }, 4000);
@@ -601,7 +789,6 @@ export default {
         showToast('Задача успешно удалена');
         await router.push('/profile/tasks');
       } catch (error) {
-        console.error('Ошибка при удалении задачи:', error);
         showToast('Не удалось удалить задачу', 'error');
       } finally {
         cancelDeleteTask();
@@ -612,35 +799,6 @@ export default {
       showDeleteConfirm.value = false;
     };
 
-    const usersWithTask = ref([]);
-    const groupsWithTask = ref([]);
-    const usersWithTaskLoading = ref(false);
-    const groupStudents = ref({});
-
-    // Переменные для модального окна назначения
-    const showGroupModal = ref(false);
-    const selectedGroupId = ref(null);
-    const groups = ref([]);
-    const groupsLoading = ref(false);
-    const assignmentLoading = ref(false);
-    const showEditModal = ref(false);
-    const editTask = ref({
-      title: '',
-      description: '',
-      deadline: '',
-      priority: 'MEDIUM',
-      selectedTagIds: [],
-      customTags: [],
-      customTag: ''
-    });
-
-    const showAttachModal = ref(false);
-    const selectedFile = ref(null);
-    const fileInput = ref(null);
-    const uploadingFile = ref(false);
-    const attachedFiles = ref([]);
-
-    // ИСПРАВЛЕННЫЙ МЕТОД ЗАГРУЗКИ ЗАДАЧИ
     const fetchTask = async () => {
       try {
         let response;
@@ -651,9 +809,7 @@ export default {
         }
 
         task.value = response.data;
-        console.log('Загруженная задача:', task.value);
 
-        // ОБЯЗАТЕЛЬНО загружаем файлы отдельно, если их нет в ответе
         if (!task.value.files || task.value.files.length === 0) {
           await fetchTaskFiles();
         }
@@ -662,24 +818,18 @@ export default {
           await fetchUsersWithTask();
         }
       } catch (error) {
-        console.error('Ошибка при получении задачи:', error);
         showToast('Не удалось загрузить задачу', 'error');
       } finally {
         loading.value = false;
       }
     };
 
-    // НОВЫЙ МЕТОД ДЛЯ ЗАГРУЗКИ ФАЙЛОВ ЗАДАЧИ
     const fetchTaskFiles = async () => {
       try {
         const response = await api.getTaskFiles(route.params.taskId);
-        console.log('Загруженные файлы задачи:', response.data);
-
-        // Обновляем файлы с правильными URL для скачивания
         const filesWithUrls = await Promise.all(
             response.data.map(async (file) => {
               try {
-                // Получаем URL для скачивания для каждого файла
                 const downloadResponse = await api.getFileDownloadUrl(route.params.taskId, file.id);
                 return {
                   ...file,
@@ -687,7 +837,6 @@ export default {
                   downloadUrl: downloadResponse.data
                 };
               } catch (error) {
-                console.error(`Не удалось получить URL для файла ${file.id}:`, error);
                 return {
                   ...file,
                   url: null,
@@ -697,15 +846,12 @@ export default {
             })
         );
 
-        // Обновляем файлы в задаче
         if (task.value) {
           task.value.files = filesWithUrls;
         }
-
-        // Также обновляем attachedFiles для модального окна
         attachedFiles.value = filesWithUrls;
       } catch (error) {
-        console.error('Ошибка при загрузке файлов задачи:', error);
+        // Файлы не загружены, но не показываем ошибку
       }
     };
 
@@ -725,7 +871,6 @@ export default {
           try {
             const groupUsersResponse = await api.getGroupStudents(group.id);
             const groupUsers = groupUsersResponse.data;
-
             groupStudents.value[group.id] = groupUsers;
 
             const allUsersHaveTask = groupUsers.length > 0 && groupUsers.every(groupUser =>
@@ -736,17 +881,16 @@ export default {
               groupsWithTask.value.push(group.id);
             }
           } catch (error) {
-            console.error(`Ошибка при получении пользователей группы ${group.id}:`, error);
             groupStudents.value[group.id] = [];
           }
         }
       } catch (error) {
-        console.error('Ошибка при получении данных о назначениях:', error);
         showToast('Не удалось загрузить данные о назначениях', 'error');
       } finally {
         usersWithTaskLoading.value = false;
       }
     };
+
     const openSolutionsModal = async () => {
       showSolutionsModal.value = true;
       await fetchSolutions();
@@ -758,7 +902,6 @@ export default {
         const response = await api.getTaskSolutions(route.params.taskId);
         solutions.value = response.data;
       } catch (error) {
-        console.error('Ошибка при загрузке решений:', error);
         showToast('Не удалось загрузить решения', 'error');
       } finally {
         solutionsLoading.value = false;
@@ -773,7 +916,6 @@ export default {
           window.open(downloadUrl, '_blank');
         }
       } catch (error) {
-        console.error('Ошибка при скачивании решения:', error);
         showToast('Не удалось скачать решение', 'error');
       }
     };
@@ -786,21 +928,15 @@ export default {
         });
         showToast('Оценка обновлена');
       } catch (error) {
-        console.error('Ошибка при обновлении оценки:', error);
         showToast('Не удалось обновить оценку', 'error');
       }
     };
 
-// Методы для студента
     const fetchStudentSolution = async () => {
       try {
         const solutionResponse = await api.getStudentSolution(route.params.taskId);
-        console.log('Данные решения:', solutionResponse.data);
-
         const solution = solutionResponse.data;
         if (solution && solution.fileName) {
-          console.log('Решение найдено через эндпоинт решения');
-
           studentSolution.value = {
             fileName: solution.fileName,
             fileSize: solution.fileSize,
@@ -809,10 +945,9 @@ export default {
             grade: solution.grade || null,
             teacherComment: solution.teacherComment || null
           };
-          return;
         }
       } catch (error) {
-        console.log('Не удалось получить данные решения:', error);
+        // Решение не найдено
       }
     };
 
@@ -866,23 +1001,12 @@ export default {
         const formData = new FormData();
         formData.append('file', selectedSolutionFile.value);
 
-        console.log('Начинаем загрузку решения...');
         await api.uploadStudentSolution(route.params.taskId, formData);
-        console.log('Решение успешно загружено на сервер');
-
         showToast('Решение успешно загружено');
         removeSolutionFile();
-
-        // ОБНОВЛЯЕМ ДАННЫЕ ПОСЛЕ ЗАГРУЗКИ
-        console.log('Обновляем данные...');
-        await fetchStudentSolution(); // Обновляем решение студента
-        await fetchTask(); // Обновляем задачу
-
-        console.log('Данные обновлены, studentSolution:', studentSolution.value);
-
+        await fetchStudentSolution();
+        await fetchTask();
       } catch (error) {
-        console.error('Ошибка при загрузке решения:', error);
-        console.error('Детали ошибки:', error.response?.data);
         showToast('Не удалось загрузить решение', 'error');
       } finally {
         uploadingSolution.value = false;
@@ -895,20 +1019,35 @@ export default {
         showToast('Решение удалено');
         studentSolution.value = null;
       } catch (error) {
-        console.error('Ошибка при удалении решения:', error);
         showToast('Не удалось удалить решение', 'error');
       }
     };
 
-// Обновим fetchTask для студента
-    onMounted(async () => {
-      await fetchTask();
-      if (user.role === 'ROLE_STUDENT') {
-        console.log('Компонент монтирован, загружаем решение студента...');
-        await fetchStudentSolution();
-        console.log('Начальное состояние studentSolution:', studentSolution.value);
+    const openDeleteCommentConfirm = (comment) => {
+      commentToDelete.value = comment;
+      showDeleteCommentConfirm.value = true;
+    };
+
+    const confirmDeleteComment = async () => {
+      if (!commentToDelete.value) return;
+
+      try {
+        await api.deleteComment(route.params.taskId, commentToDelete.value.id);
+        showToast('Комментарий удален');
+        await fetchComments(); // Обновляем список комментариев
+      } catch (error) {
+        console.error('Ошибка при удалении комментария:', error);
+        showToast('Не удалось удалить комментарий', 'error');
+      } finally {
+        cancelDeleteComment();
       }
-    });
+    };
+
+    const cancelDeleteComment = () => {
+      showDeleteCommentConfirm.value = false;
+      commentToDelete.value = null;
+    };
+
     const openEdit = () => {
       if (!task.value) return;
 
@@ -929,10 +1068,8 @@ export default {
     const fetchAvailableTags = async () => {
       try {
         const response = await api.getAvailableTags();
-        console.log('Полученные теги с бэкенда:', response.data);
         availableTags.value = response.data;
       } catch (error) {
-        console.error('Ошибка при загрузке тегов:', error);
         showToast('Не удалось загрузить список тегов', 'error');
       }
     };
@@ -975,7 +1112,6 @@ export default {
     const getGroupStudentsWithTaskCount = (groupId) => {
       const students = groupStudents.value[groupId];
       if (!students) return 0;
-
       return students.filter(student =>
           usersWithTask.value.some(userWithTask => userWithTask.id === student.id)
       ).length;
@@ -1000,15 +1136,11 @@ export default {
         const response = await api.getGroups();
         groups.value = response.data;
       } catch (error) {
-        console.error('Ошибка при получении групп:', error);
         showToast('Не удалось загрузить список групп', 'error');
       } finally {
         groupsLoading.value = false;
       }
     };
-
-
-    onMounted(fetchTask);
 
     const formatDate = (dateString) => {
       return new Date(dateString).toLocaleString();
@@ -1046,7 +1178,6 @@ export default {
         showGroupModal.value = false;
         await fetchTask();
       } catch (error) {
-        console.error('Ошибка при назначении задачи:', error);
         showToast(`Ошибка: ${error.response?.data?.message || error.message}`, 'error');
       } finally {
         assignmentLoading.value = false;
@@ -1102,21 +1233,17 @@ export default {
               : []
         };
 
-        console.log('Отправляемые данные:', JSON.stringify(taskData, null, 2));
         await api.updateTask(route.params.taskId, taskData);
         showToast('Задача успешно обновлена');
         closeEditModal();
         await fetchTask();
       } catch (error) {
-        console.error('Ошибка при обновлении задачи:', error);
-        console.error('Response error:', error.response?.data);
         showToast('Не удалось обновить задачу', 'error');
       } finally {
         updatingTask.value = false;
       }
     };
 
-    // Методы для прикрепления файлов
     const openAttach = () => {
       showAttachModal.value = true;
       fetchAttachedFiles();
@@ -1169,7 +1296,6 @@ export default {
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
-    // ИСПРАВЛЕННЫЙ МЕТОД ЗАГРУЗКИ ФАЙЛА
     const uploadFile = async () => {
       if (!selectedFile.value) return;
 
@@ -1181,13 +1307,9 @@ export default {
         await api.uploadTaskFile(route.params.taskId, formData);
         showToast('Файл успешно прикреплен');
         removeFile();
-
-        // ОБНОВЛЯЕМ ФАЙЛЫ В ЗАДАЧЕ И МОДАЛКЕ
-        await fetchTaskFiles(); // Обновляем файлы в основной задаче
-        await fetchAttachedFiles(); // Обновляем файлы в модалке
-
+        await fetchTaskFiles();
+        await fetchAttachedFiles();
       } catch (error) {
-        console.error('Ошибка при загрузке файла:', error);
         showToast('Не удалось прикрепить файл', 'error');
       } finally {
         uploadingFile.value = false;
@@ -1197,29 +1319,19 @@ export default {
     const fetchAttachedFiles = async () => {
       try {
         const response = await api.getTaskFiles(route.params.taskId);
-        console.log('Файлы с сервера для модалки:', response.data);
-        attachedFiles.value = response.data.map(file => {
-          console.log('Файл:', file);
-          console.log('URL для скачивания:', file.downloadUrl);
-          return file;
-        });
+        attachedFiles.value = response.data;
       } catch (error) {
-        console.error('Ошибка при загрузке файлов задачи:', error);
+        // Файлы не загружены
       }
     };
 
-    // ИСПРАВЛЕННЫЙ МЕТОД УДАЛЕНИЯ ФАЙЛА
     const deleteFile = async (fileId) => {
       try {
         await api.deleteTaskFile(route.params.taskId, fileId);
         showToast('Файл удален');
-
-        // ОБНОВЛЯЕМ ФАЙЛЫ В ЗАДАЧЕ И МОДАЛКЕ
-        await fetchTaskFiles(); // Обновляем файлы в основной задаче
-        await fetchAttachedFiles(); // Обновляем файлы в модалке
-
+        await fetchTaskFiles();
+        await fetchAttachedFiles();
       } catch (error) {
-        console.error('Ошибка при удалении файла:', error);
         showToast('Не удалось удалить файл', 'error');
       }
     };
@@ -1232,14 +1344,6 @@ export default {
     const backToTasks = () => {
       router.push('/profile/tasks')
     }
-
-    const showStudentModal = ref(false);
-    const students = ref([]);
-    const studentsLoading = ref(false);
-    const studentsError = ref(null);
-    const studentSearch = ref('');
-    const selectedStudentId = ref(null);
-    const studentAssignmentLoading = ref(false);
 
     const fetchStudents = async () => {
       studentsLoading.value = true;
@@ -1254,7 +1358,6 @@ export default {
           throw new Error('Неверный формат данных студентов');
         }
       } catch (error) {
-        console.error('Ошибка при получении списка студентов:', error);
         studentsError.value = error.response?.data?.message || error.message;
         showToast('Не удалось загрузить список студентов', 'error');
       } finally {
@@ -1284,7 +1387,6 @@ export default {
         showStudentModal.value = false;
         await fetchTask();
       } catch (error) {
-        console.error('Ошибка при назначении задачи:', error);
         showToast(`Ошибка: ${error.response?.data?.message || error.message}`, 'error');
       } finally {
         studentAssignmentLoading.value = false;
@@ -1305,10 +1407,150 @@ export default {
           window.open(downloadUrl, '_blank');
         }
       } catch (error) {
-        console.error('Ошибка при получении ссылки для скачивания:', error);
         showToast('Не удалось получить ссылку для скачивания', 'error');
       }
     };
+    // Методы для комментариев
+    const fetchComments = async () => {
+      commentsLoading.value = true;
+      try {
+        const response = await api.getTaskComments(route.params.taskId);
+        comments.value = response.data;
+      } catch (error) {
+        console.error('Ошибка при загрузке комментариев:', error);
+        showToast('Не удалось загрузить комментарии', 'error');
+      } finally {
+        commentsLoading.value = false;
+      }
+    };
+
+    const addComment = async () => {
+      if (!newCommentText.value.trim()) return;
+
+      addingComment.value = true;
+      try {
+        const commentData = {
+          content: newCommentText.value.trim(),
+          authorName: user.username,
+          authorRole: user.role
+        };
+
+        await api.createComment(route.params.taskId, commentData);
+        showToast('Комментарий добавлен');
+        newCommentText.value = '';
+        await fetchComments(); // Обновляем список
+      } catch (error) {
+        console.error('Ошибка при добавлении комментария:', error);
+        showToast('Не удалось добавить комментарий', 'error');
+      } finally {
+        addingComment.value = false;
+      }
+    };
+
+    const startEditComment = (comment) => {
+      editingCommentId.value = comment.id;
+      editCommentText.value = comment.content;
+    };
+
+    const cancelEdit = () => {
+      editingCommentId.value = null;
+      editCommentText.value = '';
+    };
+
+    const saveCommentEdit = async (commentId) => {
+      if (!editCommentText.value.trim()) return;
+
+      try {
+        await api.updateComment(route.params.taskId, commentId, editCommentText.value.trim());
+        showToast('Комментарий обновлен');
+        editingCommentId.value = null;
+        editCommentText.value = '';
+        await fetchComments(); // Обновляем список
+      } catch (error) {
+        console.error('Ошибка при обновлении комментария:', error);
+        showToast('Не удалось обновить комментарий', 'error');
+      }
+    };
+
+    const deleteComment = async (commentId) => {
+      if (!confirm('Вы уверены, что хотите удалить этот комментарий?')) return;
+
+      try {
+        await api.deleteComment(route.params.taskId, commentId);
+        showToast('Комментарий удален');
+        await fetchComments(); // Обновляем список
+      } catch (error) {
+        console.error('Ошибка при удалении комментария:', error);
+        showToast('Не удалось удалить комментарий', 'error');
+      }
+    };
+
+    const toggleReplies = async (commentId) => {
+      showReplies.value[commentId] = !showReplies.value[commentId];
+
+      if (showReplies.value[commentId] && !commentReplies.value[commentId]) {
+        try {
+          const response = await api.getCommentReplies(route.params.taskId, commentId);
+          commentReplies.value[commentId] = response.data;
+        } catch (error) {
+          console.error('Ошибка при загрузке ответов:', error);
+          showToast('Не удалось загрузить ответы', 'error');
+        }
+      }
+    };
+
+    const canEditComment = (comment) => {
+      return comment.authorId === user.id || user.role === 'ROLE_TEACHER';
+    };
+
+    const isCommentAuthor = (comment) => {
+      return comment.authorId === user.id;
+    };
+
+    const getCommentWord = (count) => {
+      if (count % 10 === 1 && count % 100 !== 11) return 'комментарий';
+      if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) return 'комментария';
+      return 'комментариев';
+    };
+
+    const getReplyWord = (count) => {
+      if (count % 10 === 1 && count % 100 !== 11) return 'ответ';
+      if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) return 'ответа';
+      return 'ответов';
+    };
+
+    const formatCommentTime = (dateString) => {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return 'только что';
+      if (diffMins < 60) return `${diffMins} мин. назад`;
+      if (diffHours < 24) return `${diffHours} ч. назад`;
+      if (diffDays < 7) return `${diffDays} дн. назад`;
+
+      return date.toLocaleDateString('ru-RU');
+    };
+
+    const getRoleText = (role) => {
+      const roleMap = {
+        'ROLE_TEACHER': 'Преподаватель',
+        'ROLE_STUDENT': 'Студент',
+        'ROLE_ADMIN': 'Администратор'
+      };
+      return roleMap[role] || role;
+    };
+
+    onMounted(async () => {
+      await fetchTask();
+      if (user.role === 'ROLE_STUDENT') {
+        await fetchStudentSolution();
+      }
+      await fetchComments();
+    });
 
     return {
       task,
@@ -1393,14 +1635,40 @@ export default {
       selectedSolutionFile,
       removeSolutionFile,
       uploadingSolution,
-      solutions
+      solutions,
+      comments,
+      commentsLoading,
+      newCommentText,
+      addingComment,
+      editingCommentId,
+      editCommentText,
+      showReplies,
+      commentReplies,
+      fetchComments,
+      addComment,
+      startEditComment,
+      cancelEdit,
+      saveCommentEdit,
+      deleteComment,
+      toggleReplies,
+      canEditComment,
+      isCommentAuthor,
+      getCommentWord,
+      getReplyWord,
+      formatCommentTime,
+      getRoleText,
+      openDeleteCommentConfirm,
+      confirmDeleteComment,
+      cancelDeleteComment,
+      showDeleteCommentConfirm,
+      commentToDelete,
+
     };
   }
 };
 </script>
 
 <style scoped>
-/* Стили для тостов */
 .toast {
   position: fixed;
   top: 20px;
@@ -1460,7 +1728,6 @@ export default {
   }
 }
 
-/* Стили для модалки подтверждения */
 .modal {
   position: fixed;
   top: 0;
@@ -1525,7 +1792,6 @@ export default {
   background-color: #5a6268;
 }
 
-/* Остальные стили без изменений */
 .task-detail {
   padding: 20px;
   max-width: 800px;
@@ -1539,7 +1805,6 @@ export default {
   font-size: 1.2em;
 }
 
-/* Заголовок задачи */
 .task-header {
   display: flex;
   justify-content: space-between;
@@ -1547,11 +1812,11 @@ export default {
   margin-bottom: 20px;
 }
 
-/* Тело задачи */
 .description {
   margin-bottom: 20px;
   line-height: 1.6;
 }
+
 .back-btn {
   background: #7fb3e0;
   color: white;
@@ -1561,12 +1826,14 @@ export default {
   cursor: pointer;
   font-size: 0.9em;
 }
+
 .task-info {
   background: #f8f9fa;
   padding: 15px;
   border-radius: 8px;
   margin-bottom: 20px;
 }
+
 .task-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1583,7 +1850,6 @@ export default {
   color: white;
 }
 
-/* Цвета для тегов */
 .tag-primary { background-color: #007bff; }
 .tag-secondary { background-color: #6c757d; }
 .tag-success { background-color: #28a745; }
@@ -1601,7 +1867,6 @@ export default {
   font-style: italic;
 }
 
-/* Стили для выбора тегов при создании */
 .tags-selection {
   border: 1px solid #ddd;
   border-radius: 4px;
@@ -1634,6 +1899,7 @@ export default {
   color: white;
   border-color: #007bff;
 }
+
 .info-item {
   display: flex;
   margin-bottom: 10px;
@@ -1652,7 +1918,6 @@ export default {
   flex: 1;
 }
 
-/* Кнопки действий */
 .task-actions {
   display: flex;
   gap: 10px;
@@ -1683,6 +1948,7 @@ export default {
 .action-btn.attach {
   background-color: #5f9827;
 }
+
 .action-btn.attach:hover {
   background-color: #548522;
 }
@@ -1690,27 +1956,35 @@ export default {
 .action-btn.change {
   background-color: #a69b91;
 }
+
 .action-btn.change:hover {
   background-color: #867c75;
 }
 
-/* Общие стили статусов и приоритетов */
+.action-btn.solutions {
+  background-color: #9C27B0;
+}
+
+.action-btn.solutions:hover {
+  background-color: #7B1FA2;
+}
+
 .status,
 .priority {
   padding: 3px 8px;
   border-radius: 4px;
   font-weight: bold;
-  .status-not_started {
-    background-color: #FFF3CD;
-    color: #856404;
-  }
-  .status-overdue {
-    background-color: #f8d7da;
-    color: #721c24;
-  }
 }
 
-/* Стили статусов */
+.status-not_started {
+  background-color: #FFF3CD;
+  color: #856404;
+}
+
+.status-overdue {
+  background-color: #f8d7da;
+  color: #721c24;
+}
 
 .status-in_progress {
   background-color: #D1ECF1;
@@ -1722,7 +1996,6 @@ export default {
   color: #155724;
 }
 
-/* Стили приоритетов */
 .priority-low {
   background-color: #D4EDDA;
   color: #155724;
@@ -1736,20 +2009,6 @@ export default {
 .priority-high {
   background-color: #F8D7DA;
   color: #721C24;
-}
-
-/* Общие стили модальных окон */
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0,0,0,0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
 }
 
 .modal-content {
@@ -1782,7 +2041,6 @@ export default {
   color: #333;
 }
 
-/* Стили для списков (групп и студентов) */
 .group-list,
 .students-list {
   max-height: 400px;
@@ -1791,7 +2049,6 @@ export default {
   padding-right: 5px;
 }
 
-/* Общие стили элементов списка */
 .group-item,
 .student-item {
   display: flex;
@@ -1819,7 +2076,6 @@ export default {
   animation: pulse 0.5s ease;
 }
 
-/* Аватарки */
 .group-avatar,
 .student-avatar {
   width: 40px;
@@ -1835,14 +2091,13 @@ export default {
 }
 
 .group-avatar {
-  background-color: #9C27B0; /* Фиолетовый для групп */
+  background-color: #9C27B0;
 }
 
 .student-avatar {
-  background-color: #4CAF50; /* Зеленый для студентов */
+  background-color: #4CAF50;
 }
 
-/* Информация об элементах */
 .group-info,
 .student-info {
   flex: 1;
@@ -1869,7 +2124,6 @@ export default {
   text-overflow: ellipsis;
 }
 
-/* Поле поиска */
 .search-box {
   margin-bottom: 15px;
 }
@@ -1889,7 +2143,6 @@ export default {
   box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
 }
 
-/* Сообщения об отсутствии данных */
 .no-groups,
 .no-students {
   padding: 20px;
@@ -1898,7 +2151,6 @@ export default {
   font-style: italic;
 }
 
-/* Кнопка подтверждения */
 .submit-btn {
   background-color: #4CAF50;
   color: white;
@@ -1923,14 +2175,12 @@ export default {
   cursor: not-allowed;
 }
 
-/* Индикаторы загрузки */
 .loading-groups,
 .loading-students {
   text-align: center;
   padding: 20px;
 }
 
-/* Кастомный скроллбар */
 .group-list::-webkit-scrollbar,
 .students-list::-webkit-scrollbar {
   width: 6px;
@@ -1953,12 +2203,12 @@ export default {
   background: #9e9e9e;
 }
 
-/* Анимация pulse */
 @keyframes pulse {
   0% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
   70% { box-shadow: 0 0 0 10px rgba(33, 150, 243, 0); }
   100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0); }
 }
+
 .group-item.has-task,
 .student-item.has-task {
   background-color: #f5f5f5;
@@ -1986,7 +2236,6 @@ export default {
   margin: 2px 0 0 0;
 }
 
-/* Обновляем стили для выбранных элементов с задачей */
 .group-item.has-task.selected,
 .student-item.has-task.selected {
   background-color: #f5f5f5;
@@ -1994,13 +2243,12 @@ export default {
   box-shadow: none;
   animation: none;
 }
-/* Стили для больших модальных окон */
+
 .large-modal {
   width: 600px;
   max-width: 95%;
 }
 
-/* Стили для загрузки файлов */
 .file-upload-section {
   margin: 20px 0;
 }
@@ -2063,7 +2311,6 @@ export default {
   font-size: 0.8em;
 }
 
-/* Стили для списка прикрепленных файлов */
 .attached-files-list,
 .attached-files {
   margin: 20px 0;
@@ -2112,155 +2359,13 @@ export default {
   margin-left: auto;
 }
 
-/* Стили для форм */
 .form-actions {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
   margin-top: 20px;
 }
-.student-task-solution-section {
-  border-top: 2px solid #4CAF50;
-  margin-top: 30px;
-  padding-top: 20px;
-  position: relative;
-}
 
-.student-task-solution-section::before {
-  content: "Решение задачи";
-  position: absolute;
-  top: -12px;
-  left: 20px;
-  background: white;
-  padding: 0 15px;
-  color: #4CAF50;
-  font-weight: 600;
-  font-size: 0.9em;
-}
-
-.solutions-list {
-  max-height: 600px;
-  overflow-y: auto;
-}
-
-.solution-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 15px;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  margin-bottom: 10px;
-  background: #fafafa;
-}
-
-.student-info {
-  display: flex;
-  align-items: flex-start;
-  flex: 1;
-}
-
-.student-details {
-  margin-left: 15px;
-}
-
-.student-details h4 {
-  margin: 0 0 8px 0;
-  color: #333;
-}
-
-.solution-file, .no-solution {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.9em;
-}
-
-.no-solution-text {
-  color: #666;
-  font-style: italic;
-}
-
-.grading-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 200px;
-}
-
-.grade-input, .comment-input {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.grade-field {
-  width: 80px;
-  padding: 5px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-.comment-field {
-  width: 200px;
-  height: 60px;
-  padding: 5px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  resize: vertical;
-  font-size: 0.9em;
-}
-
-/* Стили для студента */
-.current-solution {
-  background: #f8f9fa;
-  padding: 15px;
-  border-radius: 8px;
-  margin-bottom: 15px;
-}
-
-.grade-info {
-  margin-top: 15px;
-  padding-top: 15px;
-  border-top: 1px solid #dee2e6;
-}
-
-.grade-item, .comment-item {
-  display: flex;
-  margin-bottom: 8px;
-}
-
-.grade-item .label, .comment-item .label {
-  font-weight: bold;
-  min-width: 100px;
-}
-
-.grade-value {
-  color: #28a745;
-  font-weight: bold;
-}
-
-.comment-value {
-  color: #666;
-  font-style: italic;
-}
-
-.upload-solution {
-  background: #f8f9fa;
-  padding: 20px;
-  border-radius: 8px;
-  border: 2px dashed #dee2e6;
-}
-
-/* Кнопка просмотра решений */
-.action-btn.solutions {
-  background-color: #9C27B0;
-}
-
-.action-btn.solutions:hover {
-  background-color: #7B1FA2;
-}
-/* Стили для блока решения студента */
 .student-solution-section {
   background: #f8f9fa;
   border-radius: 12px;
@@ -2281,7 +2386,6 @@ export default {
   font-size: 0.95em;
 }
 
-/* Состояние: решение загружено */
 .solution-uploaded {
   background: white;
   border-radius: 8px;
@@ -2380,7 +2484,6 @@ export default {
   background: #c82333;
 }
 
-/* Обратная связь преподавателя */
 .teacher-feedback {
   background: #fff3cd;
   border: 1px solid #ffeaa7;
@@ -2442,7 +2545,6 @@ export default {
   border-radius: 8px;
 }
 
-/* Состояние: загрузка решения */
 .solution-upload {
   background: white;
   border-radius: 8px;
@@ -2495,7 +2597,6 @@ export default {
   color: #868e96;
 }
 
-/* Предпросмотр файла */
 .file-preview-card {
   background: #e7f3ff;
   border: 1px solid #b3d9ff;
@@ -2539,7 +2640,6 @@ export default {
   padding: 16px;
 }
 
-/* Кнопка отправки */
 .upload-submit-btn {
   width: 100%;
   background: #28a745;
@@ -2569,8 +2669,541 @@ export default {
   color: #856404;
 }
 
-/* Адаптивность */
+.solutions-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.solution-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 15px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: #fafafa;
+}
+
+.student-info {
+  display: flex;
+  align-items: flex-start;
+  flex: 1;
+}
+
+.student-details {
+  margin-left: 15px;
+}
+
+.student-details h4 {
+  margin: 0 0 8px 0;
+  color: #333;
+}
+
+.solution-file, .no-solution {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9em;
+}
+
+.no-solution-text {
+  color: #666;
+  font-style: italic;
+}
+
+.grading-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 200px;
+}
+
+.grade-input, .comment-input {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.grade-field {
+  width: 80px;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.comment-field {
+  width: 200px;
+  height: 60px;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  resize: vertical;
+  font-size: 0.9em;
+}
+
+.no-solutions {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+  font-style: italic;
+}
+/* Стили для комментариев */
+.comments-section {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 2px solid #e9ecef;
+}
+
+.comments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.comments-header h3 {
+  margin: 0;
+  color: #2c3e50;
+}
+
+.comments-count {
+  background: #007bff;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.comments-list {
+  margin-bottom: 30px;
+}
+
+.comment-item {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  transition: box-shadow 0.2s;
+}
+
+.comment-item:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.comment-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #4CAF50;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.role-teacher .comment-avatar {
+  background: #9C27B0;
+}
+
+.role-admin .comment-avatar {
+  background: #f44336;
+}
+
+.comment-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.comment-author {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.comment-role {
+  font-size: 0.8em;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: #e9ecef;
+  color: #6c757d;
+}
+
+.role-teacher {
+  background: #e1bee7;
+  color: #7b1fa2;
+}
+
+.role-admin {
+  background: #ffcdd2;
+  color: #c62828;
+}
+
+.comment-time {
+  color: #6c757d;
+  font-size: 0.9em;
+}
+
+.comment-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.comment-edit-btn,
+.comment-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.comment-edit-btn:hover,
+.comment-delete-btn:hover {
+  opacity: 1;
+  background: #f8f9fa;
+}
+
+.comment-edit {
+  margin-top: 8px;
+}
+
+.comment-edit-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.95em;
+  resize: vertical;
+  margin-bottom: 8px;
+}
+
+.comment-edit-input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.comment-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.save-btn,
+.cancel-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.save-btn {
+  background: #28a745;
+  color: white;
+}
+
+.cancel-btn {
+  background: #6c757d;
+  color: white;
+}
+
+.comment-text {
+  color: #2c3e50;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.comment-replies-info {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f3f4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.replies-count {
+  color: #6c757d;
+  font-size: 0.9em;
+}
+
+.show-replies-btn {
+  background: none;
+  border: none;
+  color: #007bff;
+  cursor: pointer;
+  font-size: 0.9em;
+  text-decoration: underline;
+}
+
+.show-replies-btn:hover {
+  color: #0056b3;
+}
+
+.comment-replies {
+  margin-top: 12px;
+  padding-left: 20px;
+  border-left: 3px solid #e9ecef;
+}
+
+.comment-reply {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.reply-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #17a2b8;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.8em;
+  flex-shrink: 0;
+}
+
+.reply-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.reply-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.reply-author {
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 0.9em;
+}
+
+.reply-role {
+  font-size: 0.75em;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #e9ecef;
+  color: #6c757d;
+}
+
+.reply-time {
+  color: #6c757d;
+  font-size: 0.8em;
+}
+
+.reply-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.reply-text {
+  color: #495057;
+  line-height: 1.4;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
+
+.no-comments {
+  text-align: center;
+  padding: 40px;
+  color: #6c757d;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.add-comment {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.comment-input-container {
+  margin-bottom: 12px;
+}
+
+.comment-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.95em;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+.comment-input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.comment-input-hint {
+  color: #6c757d;
+  font-size: 0.8em;
+  margin-top: 4px;
+}
+
+.send-comment-btn {
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95em;
+  transition: background-color 0.2s;
+}
+
+.send-comment-btn:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+.send-comment-btn:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+.modal-content {
+  background: white;
+  padding: 25px;
+  border-radius: 12px;
+  width: 400px;
+  max-width: 90%;
+  text-align: center;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+.modal-content h3 {
+  margin: 0 0 15px 0;
+  color: #dc3545;
+  font-size: 1.3rem;
+}
+
+.modal-content p {
+  margin: 0 0 20px 0;
+  color: #666;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.delete-btn {
+  background-color: #dc3545;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  min-width: 80px;
+}
+
+.delete-btn:hover {
+  background-color: #c82333;
+  transform: translateY(-1px);
+}
+
+.cancel-btn {
+  background-color: #6c757d;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  min-width: 80px;
+}
+
+.cancel-btn:hover {
+  background-color: #5a6268;
+  transform: translateY(-1px);
+}
+
+/* Анимация для модалки */
+.modal {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 @media (max-width: 768px) {
+  .comment-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .comment-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .comment-replies {
+    padding-left: 10px;
+  }
+
+  .comment-reply {
+    padding: 8px;
+  }
+}
+
+@media (max-width: 768px) {
+  .large-modal {
+    width: 95%;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .file-item,
+  .attached-file {
+    flex-wrap: wrap;
+  }
+
   .student-solution-section {
     padding: 16px;
   }
@@ -2590,27 +3223,6 @@ export default {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
-  }
-}
-.no-solutions {
-  text-align: center;
-  padding: 40px;
-  color: #666;
-  font-style: italic;
-}
-/* Адаптивность */
-@media (max-width: 768px) {
-  .large-modal {
-    width: 95%;
-  }
-
-  .form-actions {
-    flex-direction: column;
-  }
-
-  .file-item,
-  .attached-file {
-    flex-wrap: wrap;
   }
 }
 </style>

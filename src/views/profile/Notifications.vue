@@ -133,10 +133,12 @@ import { useToast } from 'vue-toastification'
 import { useRouter } from 'vue-router'
 import api from "@/api/index.js";
 import notificationWebSocket from '@/notifications-websocket'
+import { getCurrentInstance } from 'vue'
 
 export default {
   name: 'Notifications',
   setup() {
+    const instance = getCurrentInstance()
     const toast = useToast()
     const router = useRouter()
     const notifications = ref([])
@@ -152,6 +154,29 @@ export default {
       type: 'all'
     })
 
+    const updateParentCounter = () => {
+      if (instance.parent && instance.parent.ctx.fetchUnreadNotificationsCount) {
+        instance.parent.ctx.fetchUnreadNotificationsCount()
+      }
+    }
+
+    // Обновляем методы для вызова updateParentCounter
+    const markAsRead = async (notification) => {
+      if (!userInfo.value) return
+
+      try {
+        if (!notification.read) {
+          await api.markAsReadNotification(notification.id)
+          notification.read = true
+          updateParentCounter() // Обновляем счетчик
+        }
+      } catch (error) {
+        console.error('Ошибка при отметке уведомления как прочитанного:', error)
+        notification.read = true
+        updateParentCounter() // Обновляем счетчик
+        toast.warning('Уведомление отмечено как прочитанное (локально)')
+      }
+    }
 
     const unreadCount = computed(() => {
       return notifications.value.filter(n => !n.read).length
@@ -236,6 +261,8 @@ export default {
       } else {
         notifications.value[existingIndex] = newNotification;
       }
+
+      updateParentCounter()
     }
 
     const fetchNotifications = async () => {
@@ -281,21 +308,6 @@ export default {
         toast.error('Ошибка загрузки уведомлений')
       } finally {
         loadingMore.value = false
-      }
-    }
-
-    const markAsRead = async (notification) => {
-      if (!userInfo.value) return
-
-      try {
-        if (!notification.read) {
-          await api.markAsReadNotification(notification.id)
-          notification.read = true
-        }
-      } catch (error) {
-        console.error('Ошибка при отметке уведомления как прочитанного:', error)
-        notification.read = true
-        toast.warning('Уведомление отмечено как прочитанное (локально)')
       }
     }
 
