@@ -104,7 +104,6 @@ export default {
       const roleMap = {
         'STUDENT': 'Студент',
         'TEACHER': 'Преподаватель',
-        'CURATOR': 'Куратор',
         'ADMIN': 'Администратор'
       };
       return roleMap[role] || role;

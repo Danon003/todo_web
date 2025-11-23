@@ -102,15 +102,15 @@ export default {
     },
 
     // Solutions API
-     getTaskSolutions (taskId) {
-         return api.get(`/minio/tasks/${taskId}/solution/all`)
-     },
-     downloadStudentSolution (taskId, studentId) {
-         return api.get(`/minio/tasks/${taskId}/solution/${studentId}/download`)
-     },
-     gradeSolution (taskId, studentId, data) {
-         return api.put(`/minio/tasks/${taskId}/solution/${studentId}/grade`, data)
-     },
+    getTaskSolutions (taskId) {
+        return api.get(`/minio/tasks/${taskId}/solution/all`)
+    },
+    downloadStudentSolution (taskId, studentId) {
+        return api.get(`/minio/tasks/${taskId}/solution/${studentId}/download`)
+    },
+    gradeSolution (taskId, studentId, data) {
+        return api.put(`/minio/tasks/${taskId}/solution/${studentId}/grade`, data)
+    },
     getStudentSolution(taskId) {
         return api.get(`/minio/tasks/${taskId}/solution`)
     },
@@ -155,7 +155,7 @@ export default {
         return api.delete(`/group/${groupId}/students/${studentId}`)
     },
     getGroupData(){
-      return api.get('/user/my-group')
+        return api.get('/user/my-group')
     },
     assignTeacherToGroup(id, id2) {
         return api.put(`/admin/${id}/teacher/${id2}`, {})
@@ -181,7 +181,7 @@ export default {
         return api.get(`/admin/users/by-role?role=${role}`)
     },
     getRoleAuditLog(){
-      return api.get('admin/role-audit-log')
+        return api.get('admin/role-audit-log')
     },
     getMyUsers(){
         return api.get('/group/my-students')
@@ -192,6 +192,9 @@ export default {
     // User info
     getUserInfo() {
         return api.get('/user/me/info')
+    },
+    updateUserProfile(userData) {
+        return api.put('/user/me/update', userData)
     },
     getStudentTasks(userId) {
         return api.get(`/task/student/${userId}`);
@@ -217,6 +220,11 @@ export default {
         return api.get(`/task/${taskId}/comments/${commentId}/replies`)
     },
 
+    generateReport: (options) => {
+        return api.post('/reports/generate', options, {
+            responseType: 'blob'
+        })
+    },
 
     getNotification: (params) => axios.get(`${NOTIFICATION_API}/notifications`, {
         params: {
@@ -252,5 +260,6 @@ export default {
 
     getStudentSolutionDownloadUrl(taskId) {
         return api.get(`/minio/tasks/${taskId}/solution/download`)
-    }
+    },
+
 }

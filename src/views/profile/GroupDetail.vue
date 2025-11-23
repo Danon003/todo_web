@@ -6,7 +6,7 @@
     </div>
 
     <!-- Модалка подтверждения удаления студента -->
-    <div v-if="showDeleteStudentConfirm" class="modal">
+    <div v-if="showDeleteStudentConfirm" class="modal" @click.self="cancelRemoveStudent">
       <div class="modal-content">
         <h3>Подтверждение удаления</h3>
         <p>Вы уверены, что хотите удалить студента "{{ studentToDelete?.username }}" из группы?</p>
@@ -76,7 +76,7 @@
               <span class="dropdown-arrow">▼</span>
             </div>
 
-            <div v-if="isDropdownOpen" class="dropdown-content">
+            <div v-if="isDropdownOpen" class="dropdown-content" @click.stop>
               <div v-if="availableStudentsLoading" class="dropdown-loading">
                 Загрузка студентов...
               </div>
@@ -182,7 +182,7 @@
 </template>
 
 <script>
-import {ref, onMounted, computed} from 'vue';
+import {ref, onMounted, onUnmounted, computed} from 'vue';
 import { useRoute } from 'vue-router';
 import api from "@/api/index.js";
 import router from "@/router/index.js";
@@ -325,6 +325,15 @@ export default {
         isDropdownOpen.value = false;
       }
     };
+
+    onMounted(() => {
+      fetchGroupData();
+      document.addEventListener('click', handleClickOutside);
+    });
+
+    onUnmounted(() => {
+      document.removeEventListener('click', handleClickOutside);
+    });
 
     const getInitials = (username) => {
       if (!username) return '??';
@@ -736,6 +745,7 @@ export default {
   padding: 20px;
   max-width: 1000px;
   margin: 0 auto;
+  overflow: visible;
 }
 
 .loading, .not-found {
@@ -1006,11 +1016,13 @@ export default {
   gap: 10px;
   margin-top: 20px;
   position: relative;
+  overflow: visible;
 }
 
 .custom-dropdown {
   position: relative;
   width: 100%;
+  overflow: visible;
 }
 
 .dropdown-header {
@@ -1068,8 +1080,9 @@ export default {
   border-top: none;
   border-radius: 0 0 8px 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  max-height: 300px;
+  max-height: min(300px, calc(100vh - 200px));
   overflow-y: auto;
+  overflow-x: hidden;
   z-index: 1000;
 }
 
@@ -1241,7 +1254,7 @@ export default {
     transform: translate(-50%, -50%);
     width: 90vw;
     max-width: 400px;
-    max-height: 70vh;
+    max-height: min(70vh, calc(100vh - 100px));
     border-radius: 8px;
     border: 2px solid #17A2B8;
   }

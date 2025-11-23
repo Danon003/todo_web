@@ -69,7 +69,7 @@
         <div class="task-actions">
           <button @click="viewTask(task.id)" class="action-btn view">Просмотр</button>
           <button
-              v-if="user.role === 'ROLE_STUDENT' && task.userStatus !== 'OVERDUE'"
+              v-if="user.role === 'ROLE_STUDENT' && !isTaskExpired(task)"
               @click="openStatusModal(task)"
               class="action-btn update"
           >
@@ -77,13 +77,13 @@
           </button>
 
           <span
-              v-else-if="user.role === 'ROLE_STUDENT' && task.userStatus === 'OVERDUE'"
+              v-else-if="user.role === 'ROLE_STUDENT' && isTaskExpired(task)"
               class="status-locked"
           >
             Статус недоступен
           </span>
           <button
-              v-if="user.role === 'ROLE_STUDENT' && task.userStatus !== 'OVERDUE'"
+              v-if="user.role === 'ROLE_STUDENT' && !isTaskExpired(task)"
               @click="openShareModal(task)"
               class="action-btn share"
           >
@@ -91,7 +91,7 @@
           </button>
 
           <span
-              v-else-if="user.role === 'ROLE_STUDENT' && task.userStatus === 'OVERDUE'"
+              v-else-if="user.role === 'ROLE_STUDENT' && isTaskExpired(task)"
               class="status-locked"
           >
             Нельзя поделиться
@@ -101,7 +101,7 @@
     </div>
 
     <!-- Модальное окно создания задачи с тегами -->
-    <div v-if="showCreateModal" class="modal">
+    <div v-if="showCreateModal" class="modal" @click.self="showCreateModal = false">
       <div class="modal-content">
         <span class="close" @click="showCreateModal = false">&times;</span>
         <h3>Создать новую задачу</h3>
@@ -199,7 +199,7 @@
     </div>
 
     <!-- Модальное окно изменения статуса -->
-    <div v-if="showStatusModal" class="modal">
+    <div v-if="showStatusModal" class="modal" @click.self="showStatusModal = false">
       <div class="modal-content">
         <span class="close" @click="showStatusModal = false">&times;</span>
         <h3>Изменить статус задачи</h3>
@@ -223,7 +223,7 @@
       </div>
     </div>
 
-    <div v-if="showShareModal" class="modal">
+    <div v-if="showShareModal" class="modal" @click.self="showShareModal = false">
       <div class="modal-content">
         <span class="close" @click="showShareModal = false">&times;</span>
         <h3>Поделиться задачей: {{ taskToShare?.title }}</h3>
@@ -785,7 +785,8 @@ export default {
       toast,
       hideToast,
       applyExpiredFilter,
-      hideExpiredTasks
+      hideExpiredTasks,
+      isTaskExpired
     };
   }
 };
@@ -1051,10 +1052,13 @@ export default {
 
 .modal-content {
   background: white;
-  padding: 20px;
-  border-radius: 8px;
-  width: 500px;
+  padding: 30px;
+  border-radius: 12px;
+  width: 600px;
   max-width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
 .close {

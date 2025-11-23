@@ -128,17 +128,15 @@
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, inject } from 'vue'
 import { useToast } from 'vue-toastification'
 import { useRouter } from 'vue-router'
 import api from "@/api/index.js";
 import notificationWebSocket from '@/notifications-websocket'
-import { getCurrentInstance } from 'vue'
 
 export default {
   name: 'Notifications',
   setup() {
-    const instance = getCurrentInstance()
     const toast = useToast()
     const router = useRouter()
     const notifications = ref([])
@@ -154,9 +152,12 @@ export default {
       type: 'all'
     })
 
+    // Получаем метод обновления счетчика из родительского компонента
+    const updateNotificationCount = inject('updateNotificationCount', null)
+
     const updateParentCounter = () => {
-      if (instance.parent && instance.parent.ctx.fetchUnreadNotificationsCount) {
-        instance.parent.ctx.fetchUnreadNotificationsCount()
+      if (updateNotificationCount) {
+        updateNotificationCount()
       }
     }
 
@@ -319,12 +320,14 @@ export default {
         notifications.value.forEach(notification => {
           notification.read = true
         })
+        updateParentCounter() // Обновляем счетчик
         toast.success('Все уведомления отмечены как прочитанные')
       } catch (error) {
         console.error('Ошибка при отметке всех уведомлений:', error)
         notifications.value.forEach(notification => {
           notification.read = true
         })
+        updateParentCounter() // Обновляем счетчик
         toast.success('Все уведомления отмечены как прочитанные (локально)')
       }
     }

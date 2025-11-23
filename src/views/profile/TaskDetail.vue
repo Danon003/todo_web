@@ -7,7 +7,7 @@
     </div>
 
     <!-- Модалка подтверждения удаления задачи -->
-    <div v-if="showDeleteConfirm" class="modal">
+    <div v-if="showDeleteConfirm" class="modal" @click.self="cancelDeleteTask">
       <div class="modal-content">
         <h3>Подтверждение удаления</h3>
         <p>Вы уверены, что хотите удалить задачу "{{ task?.title }}"?</p>
@@ -18,7 +18,7 @@
       </div>
     </div>
 
-    <div v-if="showDeleteCommentConfirm" class="modal">
+    <div v-if="showDeleteCommentConfirm" class="modal" @click.self="cancelDeleteComment">
       <div class="modal-content">
         <h3>Подтверждение удаления</h3>
         <p>Вы уверены, что хотите удалить этот комментарий?</p>
@@ -30,7 +30,7 @@
     </div>
 
     <!-- Модальное окно редактирования задачи -->
-    <div v-if="showEditModal" class="modal">
+    <div v-if="showEditModal" class="modal" @click.self="closeEditModal">
       <div class="modal-content large-modal">
         <span class="close" @click="closeEditModal">&times;</span>
         <h3>Редактировать задачу</h3>
@@ -133,7 +133,7 @@
     </div>
 
     <!-- Модальное окно прикрепления файла -->
-    <div v-if="showAttachModal" class="modal">
+    <div v-if="showAttachModal" class="modal" @click.self="closeAttachModal">
       <div class="modal-content">
         <span class="close" @click="closeAttachModal">&times;</span>
         <h3>Прикрепить файл к задаче</h3>
@@ -236,7 +236,7 @@
         </div>
 
         <!-- Модальное окно решений студентов -->
-        <div v-if="showSolutionsModal" class="modal">
+        <div v-if="showSolutionsModal" class="modal" @click.self="showSolutionsModal = false">
           <div class="modal-content large-modal">
             <span class="close" @click="showSolutionsModal = false">&times;</span>
             <h3>Решения студентов</h3>
@@ -349,7 +349,10 @@
 
           <!-- Состояние: решение не загружено -->
           <div v-else class="solution-upload">
-            <div class="upload-area">
+            <div v-if="isTaskExpired(task)" class="expired-message">
+              <p>Дедлайн задачи истек. Загрузка решения недоступна.</p>
+            </div>
+            <div v-else class="upload-area">
               <div
                   class="upload-zone"
                   @click="triggerSolutionFileInput"
@@ -393,6 +396,7 @@
             </div>
 
             <button
+                v-if="!isTaskExpired(task)"
                 @click="uploadStudentSolution"
                 class="upload-submit-btn"
                 :disabled="!selectedSolutionFile || uploadingSolution"
@@ -408,12 +412,12 @@
           <button v-if="user.role === 'ROLE_TEACHER'"
                   @click="assignToOthers"
                   class="action-btn">
-            Назначить задачу
+            Назначить задачу группе
           </button>
           <button v-if="user.role === 'ROLE_TEACHER'"
                   @click="assignToStudent"
                   class="action-btn">
-            Назначить задачу
+            Назначить задачу студенту
           </button>
           <button v-if="user.role === 'ROLE_TEACHER'"
                   @click="openAttach"
@@ -442,128 +446,128 @@
       Задача не найдена
     </div>
 
-        <!-- Блок комментариев -->
-        <div class="comments-section">
-          <div class="comments-header">
-            <h3>💬 Комментарии</h3>
-            <span class="comments-count" v-if="comments.length > 0">
+    <!-- Блок комментариев -->
+    <div class="comments-section">
+      <div class="comments-header">
+        <h3>💬 Комментарии</h3>
+        <span class="comments-count" v-if="comments.length > 0">
       {{ comments.length }} {{ getCommentWord(comments.length) }}
     </span>
-          </div>
+      </div>
 
-          <!-- Список комментариев -->
-          <div class="comments-list" v-if="comments.length > 0">
-            <div v-for="comment in comments" :key="comment.id" class="comment-item">
-              <div class="comment-avatar">
-                {{ getInitials(comment.authorName) }}
-              </div>
-              <div class="comment-content">
-                <div class="comment-header">
-                  <span class="comment-author">{{ comment.authorName }}</span>
-                  <span class="comment-role" :class="'role-' + comment.authorRole.toLowerCase()">
+      <!-- Список комментариев -->
+      <div class="comments-list" v-if="comments.length > 0">
+        <div v-for="comment in comments" :key="comment.id" class="comment-item">
+          <div class="comment-avatar">
+            {{ getInitials(comment.authorName) }}
+          </div>
+          <div class="comment-content">
+            <div class="comment-header">
+              <span class="comment-author">{{ comment.authorName }}</span>
+              <span class="comment-role" :class="'role-' + comment.authorRole.toLowerCase()">
             {{ getRoleText(comment.authorRole) }}
           </span>
-                  <span class="comment-time">{{ formatCommentTime(comment.createdAt) }}</span>
+              <span class="comment-time">{{ formatCommentTime(comment.createdAt) }}</span>
 
-                  <!-- Действия с комментарием -->
-                  <div class="comment-actions" v-if="canEditComment(comment)">
-                    <button
-                        v-if="isCommentAuthor(comment)"
-                        @click="startEditComment(comment)"
-                        class="comment-edit-btn"
-                        title="Редактировать"
-                    >
-                      ✏️
-                    </button>
-                    <button
-                        @click="openDeleteCommentConfirm(comment)"
-                        class="comment-delete-btn"
-                        :title="isCommentAuthor(comment) ? 'Удалить' : 'Удалить комментарий'"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </div>
+              <!-- Действия с комментарием -->
+              <div class="comment-actions" v-if="canEditComment(comment)">
+                <button
+                    v-if="isCommentAuthor(comment)"
+                    @click="startEditComment(comment)"
+                    class="comment-edit-btn"
+                    title="Редактировать"
+                >
+                  ✏️
+                </button>
+                <button
+                    @click="openDeleteCommentConfirm(comment)"
+                    class="comment-delete-btn"
+                    :title="isCommentAuthor(comment) ? 'Удалить' : 'Удалить комментарий'"
+                >
+                  🗑️
+                </button>
+              </div>
+            </div>
 
-                <!-- Редактирование комментария -->
-                <div v-if="editingCommentId === comment.id" class="comment-edit">
+            <!-- Редактирование комментария -->
+            <div v-if="editingCommentId === comment.id" class="comment-edit">
           <textarea
               v-model="editCommentText"
               class="comment-edit-input"
               rows="3"
               placeholder="Введите текст комментария..."
           ></textarea>
-                  <div class="comment-edit-actions">
-                    <button @click="saveCommentEdit(comment.id)" class="save-btn">💾 Сохранить</button>
-                    <button @click="cancelEdit" class="cancel-btn">❌ Отмена</button>
-                  </div>
-                </div>
+              <div class="comment-edit-actions">
+                <button @click="saveCommentEdit(comment.id)" class="save-btn">💾 Сохранить</button>
+                <button @click="cancelEdit" class="cancel-btn">❌ Отмена</button>
+              </div>
+            </div>
 
-                <!-- Отображение комментария -->
-                <div v-else class="comment-text">
-                  {{ comment.content }}
-                </div>
+            <!-- Отображение комментария -->
+            <div v-else class="comment-text">
+              {{ comment.content }}
+            </div>
 
-                <!-- Счетчик ответов -->
-                <div v-if="comment.repliesCount > 0" class="comment-replies-info">
-                  <span class="replies-count">{{ comment.repliesCount }} {{ getReplyWord(comment.repliesCount) }}</span>
-                  <button @click="toggleReplies(comment.id)" class="show-replies-btn">
-                    {{ showReplies[comment.id] ? 'Скрыть' : 'Показать' }}
-                  </button>
-                </div>
+            <!-- Счетчик ответов -->
+            <div v-if="comment.repliesCount > 0" class="comment-replies-info">
+              <span class="replies-count">{{ comment.repliesCount }} {{ getReplyWord(comment.repliesCount) }}</span>
+              <button @click="toggleReplies(comment.id)" class="show-replies-btn">
+                {{ showReplies[comment.id] ? 'Скрыть' : 'Показать' }}
+              </button>
+            </div>
 
-                <!-- Ответы на комментарий -->
-                <div v-if="showReplies[comment.id] && commentReplies[comment.id]" class="comment-replies">
-                  <div
-                      v-for="reply in commentReplies[comment.id]"
-                      :key="reply.id"
-                      class="comment-reply"
-                  >
-                    <div class="reply-avatar">
-                      {{ getInitials(reply.authorName) }}
-                    </div>
-                    <div class="reply-content">
-                      <div class="reply-header">
-                        <span class="reply-author">{{ reply.authorName }}</span>
-                        <span class="reply-role" :class="'role-' + reply.authorRole.toLowerCase()">
+            <!-- Ответы на комментарий -->
+            <div v-if="showReplies[comment.id] && commentReplies[comment.id]" class="comment-replies">
+              <div
+                  v-for="reply in commentReplies[comment.id]"
+                  :key="reply.id"
+                  class="comment-reply"
+              >
+                <div class="reply-avatar">
+                  {{ getInitials(reply.authorName) }}
+                </div>
+                <div class="reply-content">
+                  <div class="reply-header">
+                    <span class="reply-author">{{ reply.authorName }}</span>
+                    <span class="reply-role" :class="'role-' + reply.authorRole.toLowerCase()">
                   {{ getRoleText(reply.authorRole) }}
                 </span>
-                        <span class="reply-time">{{ formatCommentTime(reply.createdAt) }}</span>
+                    <span class="reply-time">{{ formatCommentTime(reply.createdAt) }}</span>
 
-                        <div class="reply-actions" v-if="canEditComment(reply)">
-                          <button
-                              v-if="isCommentAuthor(reply)"
-                              @click="startEditComment(reply)"
-                              class="comment-edit-btn"
-                              title="Редактировать"
-                          >
-                            ✏️
-                          </button>
-                          <button
-                              @click="openDeleteCommentConfirm(reply)"
-                              class="comment-delete-btn"
-                              :title="isCommentAuthor(reply) ? 'Удалить' : 'Удалить комментарий'"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </div>
-                      <div class="reply-text">{{ reply.content }}</div>
+                    <div class="reply-actions" v-if="canEditComment(reply)">
+                      <button
+                          v-if="isCommentAuthor(reply)"
+                          @click="startEditComment(reply)"
+                          class="comment-edit-btn"
+                          title="Редактировать"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                          @click="openDeleteCommentConfirm(reply)"
+                          class="comment-delete-btn"
+                          :title="isCommentAuthor(reply) ? 'Удалить' : 'Удалить комментарий'"
+                      >
+                        🗑️
+                      </button>
                     </div>
                   </div>
+                  <div class="reply-text">{{ reply.content }}</div>
                 </div>
               </div>
             </div>
           </div>
+        </div>
+      </div>
 
-          <!-- Сообщение об отсутствии комментариев -->
-          <div v-else class="no-comments">
-            <p>Пока нет комментариев. Будьте первым!</p>
-          </div>
+      <!-- Сообщение об отсутствии комментариев -->
+      <div v-else class="no-comments">
+        <p>Пока нет комментариев. Будьте первым!</p>
+      </div>
 
-          <!-- Форма добавления комментария -->
-          <div class="add-comment">
-            <div class="comment-input-container">
+      <!-- Форма добавления комментария -->
+      <div class="add-comment">
+        <div class="comment-input-container">
       <textarea
           v-model="newCommentText"
           class="comment-input"
@@ -571,22 +575,22 @@
           rows="3"
           @keydown.ctrl.enter="addComment"
       ></textarea>
-              <div class="comment-input-hint">
-                Ctrl + Enter для отправки
-              </div>
-            </div>
-            <button
-                @click="addComment"
-                class="send-comment-btn"
-                :disabled="!newCommentText.trim() || addingComment"
-            >
-              {{ addingComment ? '⏳ Отправка...' : '📤 Отправить' }}
-            </button>
+          <div class="comment-input-hint">
+            Ctrl + Enter для отправки
           </div>
         </div>
+        <button
+            @click="addComment"
+            class="send-comment-btn"
+            :disabled="!newCommentText.trim() || addingComment"
+        >
+          {{ addingComment ? '⏳ Отправка...' : '📤 Отправить' }}
+        </button>
+      </div>
+    </div>
 
     <!-- Модальное окно выбора группы -->
-    <div v-if="showGroupModal" class="modal">
+    <div v-if="showGroupModal" class="modal" @click.self="showGroupModal = false">
       <div class="modal-content">
         <span class="close" @click="showGroupModal = false">&times;</span>
         <h3>Назначить задачу группе</h3>
@@ -636,7 +640,7 @@
     </div>
 
     <!-- Модальное окно выбора студента -->
-    <div v-if="showStudentModal" class="modal">
+    <div v-if="showStudentModal" class="modal" @click.self="showStudentModal = false">
       <div class="modal-content">
         <span class="close" @click="showStudentModal = false">&times;</span>
         <h3>Назначить задачу студенту</h3>
@@ -952,6 +956,10 @@ export default {
     };
 
     const triggerSolutionFileInput = () => {
+      if (task.value && isTaskExpired(task.value)) {
+        showToast('Нельзя загрузить решение для задачи с истекшим дедлайном', 'error');
+        return;
+      }
       const tempInput = document.createElement('input');
       tempInput.type = 'file';
       tempInput.style.display = 'none';
@@ -976,6 +984,10 @@ export default {
 
     const handleSolutionFileDrop = (event) => {
       event.preventDefault();
+      if (task.value && isTaskExpired(task.value)) {
+        showToast('Нельзя загрузить решение для задачи с истекшим дедлайном', 'error');
+        return;
+      }
       const file = event.dataTransfer.files[0];
       if (file) {
         if (file.size > 10 * 1024 * 1024) {
@@ -995,6 +1007,11 @@ export default {
 
     const uploadStudentSolution = async () => {
       if (!selectedSolutionFile.value) return;
+
+      if (task.value && isTaskExpired(task.value)) {
+        showToast('Нельзя загрузить решение для задачи с истекшим дедлайном', 'error');
+        return;
+      }
 
       uploadingSolution.value = true;
       try {
@@ -1244,7 +1261,16 @@ export default {
       }
     };
 
+    const isTaskExpired = (task) => {
+      if (!task || !task.deadline) return false;
+      return new Date(task.deadline) < new Date();
+    };
+
     const openAttach = () => {
+      if (task.value && isTaskExpired(task.value)) {
+        showToast('Нельзя прикрепить файл к задаче с истекшим дедлайном', 'error');
+        return;
+      }
       showAttachModal.value = true;
       fetchAttachedFiles();
     };
@@ -1554,6 +1580,7 @@ export default {
 
     return {
       task,
+      isTaskExpired,
       deleteStudentSolution,
       loading,
       user,
@@ -1743,21 +1770,31 @@ export default {
 
 .modal-content {
   background: white;
-  padding: 25px;
-  border-radius: 8px;
-  width: 400px;
+  padding: 30px;
+  border-radius: 12px;
+  width: 600px;
   max-width: 90%;
-  text-align: center;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  text-align: left;
 }
 
 .modal-content h3 {
-  margin: 0 0 15px 0;
-  color: #dc3545;
+  margin: 0 0 20px 0;
+  color: #333;
+  font-size: 1.5em;
+  font-weight: 600;
+  text-align: center;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #e9ecef;
 }
 
 .modal-content p {
   margin: 0 0 20px 0;
   color: #666;
+  line-height: 1.6;
+  text-align: center;
 }
 
 .modal-actions {
@@ -1934,7 +1971,7 @@ export default {
 }
 
 .action-btn:hover {
-  background-color: #138496;
+  background-color: #138ca1;
 }
 
 .action-btn.delete {
@@ -1946,27 +1983,27 @@ export default {
 }
 
 .action-btn.attach {
-  background-color: #5f9827;
+  background-color: #17A2B8;
 }
 
 .action-btn.attach:hover {
-  background-color: #548522;
+  background-color: #138CA1FF;
 }
 
 .action-btn.change {
-  background-color: #a69b91;
+  background-color: #17A2B8;
 }
 
 .action-btn.change:hover {
-  background-color: #867c75;
+  background-color: #138CA1FF;
 }
 
 .action-btn.solutions {
-  background-color: #9C27B0;
+  background-color: #17A2B8;
 }
 
 .action-btn.solutions:hover {
-  background-color: #7B1FA2;
+  background-color: #138CA1FF;
 }
 
 .status,
@@ -2013,11 +2050,13 @@ export default {
 
 .modal-content {
   background: white;
-  padding: 25px;
+  padding: 30px;
   border-radius: 12px;
-  width: 500px;
+  width: 600px;
   max-width: 90%;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
 .modal h3 {
@@ -2051,9 +2090,8 @@ export default {
 
 .group-item,
 .student-item {
-  display: flex;
   align-items: center;
-  padding: 12px 15px;
+  padding: 10px;
   margin-bottom: 8px;
   border-radius: 8px;
   cursor: pointer;
@@ -2551,6 +2589,22 @@ export default {
   padding: 20px;
 }
 
+.expired-message {
+  background: #f6a8a8;
+  border: 1px solid #f53b38;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.expired-message p {
+  margin: 0;
+  color: #850404;
+  font-weight: 500;
+  font-size: 1.1em;
+}
+
 .upload-area {
   margin-bottom: 20px;
 }
@@ -2675,7 +2729,6 @@ export default {
 }
 
 .solution-item {
-  display: flex;
   justify-content: space-between;
   align-items: flex-start;
   padding: 15px;
@@ -2686,7 +2739,6 @@ export default {
 }
 
 .student-info {
-  display: flex;
   align-items: flex-start;
   flex: 1;
 }
@@ -2720,8 +2772,12 @@ export default {
 }
 
 .grade-input, .comment-input {
+  border: 1px solid #ddd;
+  padding: 12px;
+  border-radius: 8px;
   display: flex;
   flex-direction: column;
+  text-align: start;
   gap: 5px;
 }
 
@@ -3095,12 +3151,14 @@ export default {
 }
 .modal-content {
   background: white;
-  padding: 25px;
+  padding: 30px;
   border-radius: 12px;
-  width: 400px;
+  width: 600px;
   max-width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
   text-align: center;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
 .modal-content h3 {
