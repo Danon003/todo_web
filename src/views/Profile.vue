@@ -40,6 +40,7 @@
             :to="link.path"
             class="nav-link"
             :exact="link.path === '/profile'"
+            active-class="active"
             :title="isSidebarCollapsed ? link.title : ''"
         >
           <span class="nav-link-text" v-if="!isSidebarCollapsed">{{ link.title }}</span>
@@ -90,8 +91,9 @@
                 type="password"
                 placeholder="Введите новый пароль"
                 :disabled="updating"
+                minlength="4"
             >
-            <small class="form-hint">Оставьте поле пустым, если не хотите менять пароль</small>
+            <small class="form-hint">Оставьте поле пустым, если не хотите менять пароль. Минимальная длина: 4 символа</small>
           </div>
           <div class="form-actions">
             <button type="button" @click="closeEditModal" class="cancel-btn" :disabled="updating">
@@ -160,11 +162,12 @@ export default {
     const getLinkIcon = (linkName) => {
       const iconMap = {
         'profile-overview': '📊',
-        'tasks': '📝',
+        'tasks': '📋',
         'groups': '👥',
         'users': '👤',
         'calendar': '📅',
         'my-group': '👥',
+        'video-meetings': '📹',
         'notifications': '🔔'
       }
       return iconMap[linkName] || '•'
@@ -234,12 +237,14 @@ export default {
           { path: '/profile', title: 'Обзор', name: 'profile-overview' },
           { path: '/profile/groups', title: 'Управление группами', name: 'groups' },
           { path: '/profile/users', title: 'Управление пользователями', name: 'users' },
+          { path: '/profile/video-meetings', title: 'Видеовстречи', name: 'video-meetings' },
           { path: '/profile/notifications', title: 'Уведомления', name: 'notifications' }
         ],
         'ROLE_TEACHER': [
           { path: '/profile', title: 'Обзор', name: 'profile-overview' },
           { path: '/profile/tasks', title: 'Задачи', name: 'tasks' },
           { path: '/profile/groups', title: 'Группы', name: 'groups' },
+          { path: '/profile/video-meetings', title: 'Видеовстречи', name: 'video-meetings' },
           { path: '/profile/notifications', title: 'Уведомления', name: 'notifications' }
         ],
         'ROLE_STUDENT': [
@@ -247,6 +252,7 @@ export default {
           { path: '/profile/tasks', title: 'Мои задачи', name: 'tasks' },
           { path: '/profile/calendar', title: 'Календарь', name: 'calendar' },
           { path: '/profile/my-group', title: 'Моя группа', name: 'my-group' },
+          { path: '/profile/video-meetings', title: 'Видеовстречи', name: 'video-meetings' },
           { path: '/profile/notifications', title: 'Уведомления', name: 'notifications' }
         ]
       };
@@ -279,6 +285,14 @@ export default {
 
     const saveProfile = async () => {
       if (!user.value) return
+
+      // Валидация пароля, если он указан
+      if (editForm.value.password && editForm.value.password.trim() !== '') {
+        if (editForm.value.password.length < 4) {
+          showToast('Пароль должен содержать минимум 4 символа', 'error')
+          return
+        }
+      }
 
       updating.value = true
       try {
@@ -464,7 +478,7 @@ nav {
 }
 
 .nav-link.active {
-  background: #4a90e2;
+  background: #4388c0;
 }
 
 .nav-link-text {

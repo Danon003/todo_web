@@ -17,28 +17,59 @@
            :class="['day-cell', {
              'current-month': day.isCurrentMonth,
              'today': day.isToday,
-             'has-tasks': day.hasTasks
+             'has-tasks': day.hasTasks,
+             'has-meetings': day.hasMeetings
            }]"
            @click="viewDayTasks(day.date)">
         <div class="day-number">{{ day.dayNumber }}</div>
-        <div v-if="day.hasTasks" class="task-indicator"></div>
+        <div
+            v-if="day.hasTasks || day.hasMeetings"
+            class="indicator-row"
+        >
+          <span v-if="day.hasTasks" class="indicator indicator-task"></span>
+          <span v-if="day.hasMeetings" class="indicator indicator-meeting"></span>
+        </div>
       </div>
     </div>
 
-    <div v-if="selectedDate" class="day-tasks">
-      <h3>Задачи на {{ formatSelectedDate }}</h3>
-      <div v-if="tasksForSelectedDate.length > 0" class="tasks-list">
-        <div v-for="task in tasksForSelectedDate" :key="task.id" class="task-item">
-          <h4>{{ task.title }}</h4>
-          <p class="deadline">До: {{ formatDateTime(task.deadline) }}</p>
-          <p class="priority">Приоритет: {{ getPriorityText(task.priority) }}</p>
-          <p class="status" :class="'status-' + task.userStatus.toLowerCase()">
-            {{ getStatusText(task.userStatus) }}
-          </p>
+    <div v-if="selectedDate" class="day-events">
+      <div class="section-block">
+        <h3>Задачи на {{ formatSelectedDate }}</h3>
+        <div v-if="tasksForSelectedDate.length > 0" class="tasks-list">
+          <div v-for="task in tasksForSelectedDate" :key="task.id" class="task-item">
+            <h4>{{ task.title }}</h4>
+            <p class="deadline">До: {{ formatDateTime(task.deadline) }}</p>
+            <p class="priority">Приоритет: {{ getPriorityText(task.priority) }}</p>
+            <p class="status" :class="'status-' + task.userStatus.toLowerCase()">
+              {{ getStatusText(task.userStatus) }}
+            </p>
+          </div>
+        </div>
+        <div v-else class="no-tasks">
+          Нет задач на выбранную дату
         </div>
       </div>
-      <div v-else class="no-tasks">
-        Нет задач на выбранную дату
+
+      <div class="section-block">
+        <h3>Видеовстречи на {{ formatSelectedDate }}</h3>
+        <div v-if="meetingsForSelectedDate.length > 0" class="meetings-list">
+          <div v-for="meeting in meetingsForSelectedDate" :key="meeting.id" class="meeting-item">
+            <div class="meeting-header">
+              <h4>{{ meeting.title }}</h4>
+              <span class="meeting-status" :class="'status-' + getMeetingStatus(meeting).class">
+                {{ getMeetingStatus(meeting).label }}
+              </span>
+            </div>
+            <p class="meeting-time">Начало: {{ formatDateTime(meeting.startTime) }}</p>
+            <p v-if="meeting.endTime" class="meeting-time">Окончание: {{ formatDateTime(meeting.endTime) }}</p>
+            <p v-if="meeting.groupName" class="meeting-group">Группа: {{ meeting.groupName }}</p>
+            <p v-else class="meeting-group">Доступна всем студентам</p>
+            <p v-if="meeting.description" class="meeting-description">{{ meeting.description }}</p>
+          </div>
+        </div>
+        <div v-else class="no-meetings">
+          Нет видеовстреч на выбранную дату
+        </div>
       </div>
     </div>
   </div>
@@ -46,7 +77,6 @@
 
 <script>
 import { ref, computed, onMounted } from 'vue';
-import axios from 'axios';
 import api from "@/api/index.js";
 
 export default {
@@ -55,11 +85,11 @@ export default {
     const currentDate = ref(new Date());
     const selectedDate = ref(null);
     const tasks = ref([]);
+    const meetings = ref([]);
     const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
     const fetchTasks = async () => {
       try {
-        const token = localStorage.getItem('jwt-token');
         const response = await api.getMyTasks();
         tasks.value = response.data;
       } catch (error) {
@@ -67,8 +97,19 @@ export default {
       }
     };
 
+    const fetchMeetings = async () => {
+      try {
+        const response = await api.getVideoMeetings();
+        meetings.value = response.data || [];
+      } catch (error) {
+        console.error('Ошибка при получении встреч:', error);
+        meetings.value = [];
+      }
+    };
+
     onMounted(() => {
       fetchTasks();
+      fetchMeetings();
       // Устанавливаем текущую дату в формате YYYY-MM-DD
       selectedDate.value = formatDateToISO(new Date());
     });
@@ -135,7 +176,8 @@ export default {
           date: dateStr,
           isCurrentMonth: false,
           isToday: dateStr === todayStr,
-          hasTasks: hasTasksForDate(dateStr)
+          hasTasks: hasTasksForDate(dateStr),
+          hasMeetings: hasMeetingsForDate(dateStr)
         });
       }
 
@@ -153,7 +195,8 @@ export default {
           date: dateStr,
           isCurrentMonth: true,
           isToday: dateStr === todayStr,
-          hasTasks: hasTasksForDate(dateStr)
+          hasTasks: hasTasksForDate(dateStr),
+          hasMeetings: hasMeetingsForDate(dateStr)
         });
       }
 
@@ -175,7 +218,8 @@ export default {
           date: dateStr,
           isCurrentMonth: false,
           isToday: dateStr === todayStr,
-          hasTasks: hasTasksForDate(dateStr)
+          hasTasks: hasTasksForDate(dateStr),
+          hasMeetings: hasMeetingsForDate(dateStr)
         });
       }
 
@@ -190,12 +234,29 @@ export default {
       });
     };
 
+    const hasMeetingsForDate = (date) => {
+      return meetings.value.some(meeting => {
+        if (!meeting.startTime) return false;
+        const meetingDate = meeting.startTime.split('T')[0];
+        return meetingDate === date;
+      });
+    };
+
     const tasksForSelectedDate = computed(() => {
       if (!selectedDate.value) return [];
       return tasks.value.filter(task => {
         if (!task.deadline) return false;
         const taskDate = task.deadline.split('T')[0];
         return taskDate === selectedDate.value;
+      });
+    });
+
+    const meetingsForSelectedDate = computed(() => {
+      if (!selectedDate.value) return [];
+      return meetings.value.filter(meeting => {
+        if (!meeting.startTime) return false;
+        const meetingDate = meeting.startTime.split('T')[0];
+        return meetingDate === selectedDate.value;
       });
     });
 
@@ -261,6 +322,20 @@ export default {
       selectedDate.value = date;
     };
 
+    const getMeetingStatus = (meeting) => {
+      const now = new Date();
+      const start = meeting.startTime ? new Date(meeting.startTime) : null;
+      const end = meeting.endTime ? new Date(meeting.endTime) : null;
+
+      if (end && now > end) {
+        return { label: 'Завершена', class: 'ended' };
+      }
+      if (start && now >= start && (!end || now <= end)) {
+        return { label: 'Идет', class: 'active' };
+      }
+      return { label: 'Запланирована', class: 'upcoming' };
+    };
+
     return {
       currentDate,
       selectedDate,
@@ -269,10 +344,12 @@ export default {
       currentMonthName,
       calendarDays,
       tasksForSelectedDate,
+      meetingsForSelectedDate,
       formatSelectedDate,
       formatDateTime,
       getStatusText,
       getPriorityText,
+      getMeetingStatus,
       prevMonth,
       nextMonth,
       viewDayTasks
@@ -284,6 +361,13 @@ export default {
 <style scoped>
 .calendar-container {
   margin: 0;
+  padding: 0 40px 0 0;
+}
+
+@media (max-width: 1024px) {
+  .calendar-container {
+    padding-right: 0;
+  }
 }
 
 .calendar-header {
@@ -340,25 +424,48 @@ export default {
   background: #e6f7ff;
 }
 
+.day-cell.has-meetings {
+  border-color: rgba(13, 110, 253, 0.4);
+}
+
 .day-number {
   align-self: flex-end;
 }
 
-.task-indicator {
-  width: 8px;
-  height: 8px;
-  background-color: #ff0606;
-  border-radius: 50%;
+.indicator-row {
   margin-top: auto;
-  align-self: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
 }
 
-.day-tasks {
+.indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.indicator-task {
+  background-color: #ff4d4f;
+}
+
+.indicator-meeting {
+  background-color: #0d6efd;
+}
+
+.day-events {
   margin-top: 30px;
   padding: 20px;
   background: white;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.section-block + .section-block {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #f0f0f0;
 }
 
 .tasks-list {
@@ -414,5 +521,68 @@ export default {
   text-align: center;
   padding: 20px;
   color: #666;
+}
+
+.no-meetings {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+}
+
+.meetings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.meeting-item {
+  padding: 15px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.meeting-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.meeting-header h4 {
+  margin: 0;
+}
+
+.meeting-status {
+  font-size: 0.85em;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-weight: 600;
+}
+
+.status-upcoming {
+  background: #e0f3ff;
+  color: #0b6efd;
+}
+
+.status-active {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-ended {
+  background: #fde2e1;
+  color: #a94442;
+}
+
+.meeting-time,
+.meeting-group,
+.meeting-description {
+  margin: 4px 0;
+  color: #555;
+}
+
+.meeting-description {
+  font-size: 0.9em;
 }
 </style>
