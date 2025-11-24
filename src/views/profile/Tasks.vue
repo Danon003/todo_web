@@ -1,6 +1,6 @@
 <template>
   <div class="tasks-container">
-    <!-- Тосты для уведомлений -->
+    <!-- Тосты для уведомлений (без изменений) -->
     <div v-if="toast.show" :class="['toast', `toast-${toast.type}`]">
       <span>{{ toast.message }}</span>
       <button @click="hideToast" class="toast-close">×</button>
@@ -18,12 +18,45 @@
         <option value="deadline">По дате</option>
         <option value="priority">По приоритету</option>
       </select>
+      <!-- Фильтр по тегам -->
+      <select v-model="selectedTagFilter" class="filter-select" @change="applyTagFilter">
+        <option value="">Все теги</option>
+        <option v-for="tag in availableTags" :key="tag.id" :value="tag.name">
+          {{ tag.name }}
+        </option>
+      </select>
+
+      <label class="hide-expired-checkbox">
+        <input
+            type="checkbox"
+            v-model="hideExpiredTasks"
+            @change="applyExpiredFilter"
+        >
+        <span class="checkmark"></span>
+        Скрыть прошедшие задачи
+      </label>
     </div>
 
     <div class="tasks-list">
       <div v-for="task in filteredTasks" :key="task.id" class="task-card">
         <h3>{{ task.title }}</h3>
         <p>{{ task.description }}</p>
+
+        <!-- Блок тегов -->
+        <div class="task-tags" v-if="task.tags && task.tags.length > 0">
+          <span
+              v-for="tag in task.tags"
+              :key="tag"
+              class="tag"
+              :class="getTagClass(tag)"
+          >
+            {{ typeof tag === 'string' ? tag : tag.name }}
+          </span>
+        </div>
+        <div v-else class="no-tags">
+          <span class="no-tags-text">Нет тегов</span>
+        </div>
+
         <div class="task-meta">
           <span class="deadline">До: {{ formatDate(task.deadline) }}</span>
           <span class="priority">Приоритет: {{ getPriorityText(task.priority) }}</span>
@@ -36,7 +69,7 @@
         <div class="task-actions">
           <button @click="viewTask(task.id)" class="action-btn view">Просмотр</button>
           <button
-              v-if="user.role === 'ROLE_STUDENT' && task.userStatus !== 'OVERDUE'"
+              v-if="user.role === 'ROLE_STUDENT' && !isTaskExpired(task)"
               @click="openStatusModal(task)"
               class="action-btn update"
           >
@@ -44,13 +77,13 @@
           </button>
 
           <span
-              v-else-if="user.role === 'ROLE_STUDENT' && task.userStatus === 'OVERDUE'"
+              v-else-if="user.role === 'ROLE_STUDENT' && isTaskExpired(task)"
               class="status-locked"
           >
             Статус недоступен
           </span>
           <button
-              v-if="user.role === 'ROLE_STUDENT' && task.userStatus !== 'OVERDUE'"
+              v-if="user.role === 'ROLE_STUDENT' && !isTaskExpired(task)"
               @click="openShareModal(task)"
               class="action-btn share"
           >
@@ -58,7 +91,7 @@
           </button>
 
           <span
-              v-else-if="user.role === 'ROLE_STUDENT' && task.userStatus === 'OVERDUE'"
+              v-else-if="user.role === 'ROLE_STUDENT' && isTaskExpired(task)"
               class="status-locked"
           >
             Нельзя поделиться
@@ -67,8 +100,8 @@
       </div>
     </div>
 
-    <!-- Модальное окно создания задачи -->
-    <div v-if="showCreateModal" class="modal">
+    <!-- Модальное окно создания задачи с тегами -->
+    <div v-if="showCreateModal" class="modal" @click.self="showCreateModal = false">
       <div class="modal-content">
         <span class="close" @click="showCreateModal = false">&times;</span>
         <h3>Создать новую задачу</h3>
@@ -93,13 +126,80 @@
               <option value="HIGH">Высокий</option>
             </select>
           </div>
+
+          <!-- Блок тегов при создании -->
+          <div class="form-group">
+            <label>Теги:</label>
+            <div class="tags-selection">
+              <div class="available-tags-container">
+                <div class="available-tags-header">
+                  <span>Доступные теги ({{ availableTags.length }})</span>
+                  <div class="tags-search" v-if="availableTags.length > 5">
+                    <input
+                        v-model="tagSearch"
+                        type="text"
+                        placeholder="Поиск тега..."
+                        class="tag-search-input"
+                    >
+                  </div>
+                </div>
+
+                <div class="available-tags-scrollable">
+                  <div v-if="filteredAvailableTags.length === 0" class="no-tags-available">
+                    {{ tagSearch ? 'Теги не найдены' : 'Нет доступных тегов' }}
+                  </div>
+                  <span
+                      v-else
+                      v-for="tag in filteredAvailableTags"
+                      :key="tag.id"
+                      class="tag-selectable"
+                      :class="{
+            selected: newTask.selectedTagIds.includes(tag.id),
+            'search-match': tagSearch && tag.name.toLowerCase().includes(tagSearch.toLowerCase())
+          }"
+                      @click="toggleTagSelection(tag.id)"
+                  >
+          {{ tag.name }}
+          <span v-if="newTask.selectedTagIds.includes(tag.id)" class="selected-indicator">✓</span>
+        </span>
+                </div>
+              </div>
+
+              <!-- Блок добавления новых тегов -->
+              <div class="custom-tags-section">
+                <div class="tag-input-container">
+                  <input
+                      v-model="newTask.customTag"
+                      type="text"
+                      placeholder="Добавить новый тег..."
+                      @keydown.enter.prevent="addCustomTag"
+                      class="tag-input"
+                  >
+                  <button type="button" @click="addCustomTag" class="add-tag-btn">+</button>
+                </div>
+
+                <div v-if="newTask.customTags.length > 0" class="custom-tags">
+                  <span class="custom-tags-label">Новые теги:</span>
+                  <span
+                      v-for="tag in newTask.customTags"
+                      :key="tag"
+                      class="tag custom-tag"
+                  >
+          {{ tag }}
+          <span @click="removeCustomTag(tag)" class="remove-tag">×</span>
+        </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <button type="submit" class="submit-btn">Создать</button>
         </form>
       </div>
     </div>
 
     <!-- Модальное окно изменения статуса -->
-    <div v-if="showStatusModal" class="modal">
+    <div v-if="showStatusModal" class="modal" @click.self="showStatusModal = false">
       <div class="modal-content">
         <span class="close" @click="showStatusModal = false">&times;</span>
         <h3>Изменить статус задачи</h3>
@@ -123,7 +223,7 @@
       </div>
     </div>
 
-    <div v-if="showShareModal" class="modal">
+    <div v-if="showShareModal" class="modal" @click.self="showShareModal = false">
       <div class="modal-content">
         <span class="close" @click="showShareModal = false">&times;</span>
         <h3>Поделиться задачей: {{ taskToShare?.title }}</h3>
@@ -199,6 +299,21 @@ export default {
     const usersWithSharedTask = ref([]);
     const usersWithTaskLoading = ref(false);
 
+    // Новые переменные для тегов
+    const availableTags = ref([]);
+    const selectedTagFilter = ref('');
+    const tagSearch = ref('');
+    const hideExpiredTasks = ref(false);
+    const filteredAvailableTags = computed(() => {
+      if (!tagSearch.value) {
+        return availableTags.value;
+      }
+
+      const searchTerm = tagSearch.value.toLowerCase();
+      return availableTags.value.filter(tag =>
+          tag.name.toLowerCase().includes(searchTerm)
+      );
+    });
     // Переменные для уведомлений
     const toast = ref({
       show: false,
@@ -226,10 +341,64 @@ export default {
       title: '',
       description: '',
       deadline: '',
-      priority: 'MEDIUM'
+      priority: 'MEDIUM',
+      selectedTagIds: [],     // ID выбранных тегов
+      customTags: [],         // Пользовательские теги
+      customTag: ''           // Поле для ввода нового тега
     });
+
     const user = JSON.parse(localStorage.getItem('user') || '{}');
 
+
+
+
+    const isTaskExpired = (task) => {
+      return new Date(task.deadline) < new Date();
+    };
+
+    const filteredTasks = computed(() => {
+      let result = [...tasks.value];
+
+      // Фильтрация по статусу
+      if (filterStatus.value !== 'all') {
+        result = result.filter(task => task.userStatus === filterStatus.value);
+      }
+
+      // Фильтрация по тегу
+      if (selectedTagFilter.value) {
+        result = result.filter(task => {
+          if (!task.tags || task.tags.length === 0) return false;
+
+          return task.tags.some(tag => {
+            const tagName = typeof tag === 'string' ? tag : tag.name;
+            return tagName === selectedTagFilter.value;
+          });
+        });
+      }
+
+      // Новая фильтрация: скрытие прошедших задач
+      if (hideExpiredTasks.value) {
+        result = result.filter(task => !isTaskExpired(task));
+      }
+
+      // Сортировка
+      result.sort((a, b) => {
+        if (sortField.value === 'deadline') {
+          return new Date(a.deadline) - new Date(b.deadline);
+        } else {
+          const priorityOrder = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+          return priorityOrder[b.priority] - priorityOrder[a.priority];
+        }
+      });
+
+      return result;
+    });
+
+    // Новый метод для применения фильтра прошедших задач
+    const applyExpiredFilter = () => {
+      // Фильтрация применяется автоматически через computed свойство
+      console.log('Скрытие прошедших задач:', hideExpiredTasks.value);
+    };
     // Переменные для функционала "Поделиться"
     const groupMembers = ref([]);
     const groupMembersLoading = ref(false);
@@ -250,6 +419,17 @@ export default {
       } catch (error) {
         console.error('Ошибка при получении задач:', error);
         showToast('Не удалось загрузить задачи', 'error');
+      }
+    };
+
+    const fetchAvailableTags = async () => {
+      try {
+        const response = await api.getAvailableTags();
+        console.log('Полученные теги с бэкенда:', response.data); // Для дебага
+        availableTags.value = response.data;
+      } catch (error) {
+        console.error('Ошибка при загрузке тегов:', error);
+        showToast('Не удалось загрузить список тегов', 'error');
       }
     };
 
@@ -299,26 +479,9 @@ export default {
 
     onMounted(() => {
       fetchTasks();
+      fetchAvailableTags(); // Загружаем теги при монтировании
     });
 
-    const filteredTasks = computed(() => {
-      let result = [...tasks.value];
-
-      if (filterStatus.value !== 'all') {
-        result = result.filter(task => task.userStatus === filterStatus.value);
-      }
-
-      result.sort((a, b) => {
-        if (sortField.value === 'deadline') {
-          return new Date(a.deadline) - new Date(b.deadline);
-        } else {
-          const priorityOrder = { HIGH: 3, MEDIUM: 2, LOW: 1 };
-          return priorityOrder[b.priority] - priorityOrder[a.priority];
-        }
-      });
-
-      return result;
-    });
 
     const filteredMembers = computed(() => {
       let members = groupMembers.value;
@@ -333,10 +496,64 @@ export default {
 
       return members;
     });
+
     const isSelectedMemberHasTask = computed(() => {
       if (!selectedMember.value) return false;
       return usersWithSharedTask.value.some(user => user.id === selectedMember.value);
     });
+
+    // Новые методы для работы с тегами
+    const getTagClass = (tag) => {
+      // Получаем имя тега (может быть объектом или строкой)
+      const tagName = typeof tag === 'string' ? tag : tag.name || '';
+
+      // Генерируем класс на основе имени тега для разных цветов
+      const tagColors = [
+        'tag-primary', 'tag-secondary', 'tag-success',
+        'tag-warning', 'tag-danger', 'tag-info'
+      ];
+      const index = tagName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % tagColors.length;
+      return tagColors[index];
+    };
+
+    const toggleTagSelection = (tagId) => {
+      const index = newTask.value.selectedTagIds.indexOf(tagId);
+      if (index > -1) {
+        newTask.value.selectedTagIds.splice(index, 1);
+      } else {
+        newTask.value.selectedTagIds.push(tagId);
+      }
+    };
+
+    const addCustomTag = () => {
+      const tagName = newTask.value.customTag.trim();
+
+      if (tagName && !newTask.value.customTags.includes(tagName)) {
+        // Проверяем, нет ли уже такого тега в доступных тегах
+        const existingTag = availableTags.value.find(tag => tag.name === tagName);
+
+        if (existingTag) {
+          // Если тег уже существует, добавляем его ID в выбранные
+          if (!newTask.value.selectedTagIds.includes(existingTag.id)) {
+            newTask.value.selectedTagIds.push(existingTag.id);
+          }
+          showToast(`Тег "${tagName}" уже существует и был добавлен к задаче`);
+        } else {
+          // Добавляем новый кастомный тег
+          newTask.value.customTags.push(tagName);
+        }
+
+        newTask.value.customTag = '';
+      }
+    };
+
+    const removeCustomTag = (tagToRemove) => {
+      newTask.value.customTags = newTask.value.customTags.filter(tag => tag !== tagToRemove);
+    };
+
+    const applyTagFilter = () => {
+      // Фильтрация применяется автоматически через computed свойство
+    };
 
     const formatDate = (dateString) => {
       return new Date(dateString).toLocaleString();
@@ -447,19 +664,74 @@ export default {
 
     const createTask = async () => {
       try {
-        await api.createTask(newTask.value);
+        // Сначала создаем новые кастомные теги, если они есть
+        const createdTagIds = [];
+
+        if (newTask.value.customTags.length > 0) {
+          for (const tagName of newTask.value.customTags) {
+            try {
+              const response = await api.createTag({ name: tagName });
+              createdTagIds.push(response.data.id);
+              console.log(`Создан тег: ${tagName} с ID: ${response.data.id}`);
+            } catch (error) {
+              console.error(`Ошибка при создании тега ${tagName}:`, error);
+              // Если тег уже существует, просто продолжаем
+              if (error.response?.status === 400) {
+                // Можно попробовать найти существующий тег по имени
+                const existingTag = availableTags.value.find(tag => tag.name === tagName);
+                if (existingTag) {
+                  createdTagIds.push(existingTag.id);
+                }
+              }
+            }
+          }
+        }
+
+        // Объединяем выбранные теги и созданные кастомные теги
+        const allTagIds = [...newTask.value.selectedTagIds, ...createdTagIds];
+
+        console.log('Все ID тегов для задачи:', allTagIds);
+        console.log('Имена кастомных тегов:', newTask.value.customTags);
+
+        const taskData = {
+          title: newTask.value.title,
+          description: newTask.value.description,
+          deadline: newTask.value.deadline,
+          priority: newTask.value.priority,
+          tagIds: allTagIds,
+          tagNames: newTask.value.customTags.length > 0 ? newTask.value.customTags : null
+        };
+
+        console.log('Данные для создания задачи:', taskData);
+
+        await api.createTask(taskData);
         showCreateModal.value = false;
         showToast('Задача успешно создана');
         await fetchTasks();
+
+        // Сброс формы
         newTask.value = {
           title: '',
           description: '',
           deadline: '',
-          priority: 'MEDIUM'
+          priority: 'MEDIUM',
+          selectedTagIds: [],
+          customTags: [],
+          customTag: ''
         };
+
+        // Обновляем список доступных тегов
+        await fetchAvailableTags();
+
       } catch (error) {
         console.error('Ошибка при создании задачи:', error);
-        showToast('Не удалось создать задачу', 'error');
+        let errorMessage = 'Не удалось создать задачу';
+
+        if (error.response?.data?.message) {
+          errorMessage = error.response.data.message;
+        }
+
+        showToast(errorMessage, 'error');
       }
     };
 
@@ -486,10 +758,17 @@ export default {
       filteredMembers,
       sharingInProgress,
       taskToShare,
+      availableTags,
+      selectedTagFilter,
       formatDate,
       getStatusText,
       getPriorityText,
       getInitials,
+      getTagClass,
+      toggleTagSelection,
+      addCustomTag,
+      removeCustomTag,
+      applyTagFilter,
       viewTask,
       openStatusModal,
       openShareModal,
@@ -498,17 +777,27 @@ export default {
       shareTask,
       createTask,
       assignTask,
+      filteredAvailableTags,
+      tagSearch,
       isSelectedMemberHasTask,
       usersWithSharedTask,
       usersWithTaskLoading,
       toast,
-      hideToast
+      hideToast,
+      applyExpiredFilter,
+      hideExpiredTasks,
+      isTaskExpired
     };
   }
 };
 </script>
 
 <style scoped>
+/* Базовые стили */
+.tasks-container {
+  padding: 20px;
+}
+
 /* Стили для тостов */
 .toast {
   position: fixed;
@@ -569,11 +858,7 @@ export default {
   }
 }
 
-/* Остальные стили без изменений */
-.tasks-container {
-  padding: 20px;
-}
-
+/* Заголовок и кнопки */
 .tasks-header {
   display: flex;
   justify-content: space-between;
@@ -590,18 +875,43 @@ export default {
   cursor: pointer;
 }
 
+/* Фильтры */
 .filters {
   display: flex;
-  gap: 10px;
+  gap: 15px;
   margin-bottom: 20px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .filter-select {
-  padding: 8px;
-  border-radius: 4px;
-  border: 1px solid #ddd;
+  padding: 10px 15px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  background-color: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-width: 150px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.filter-select:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+
+.filter-select:hover {
+  border-color: #bdbdbd;
+}
+
+.filter-select:not([value=""]) {
+  border-color: #4CAF50;
+  background-color: #f8fff9;
+}
+
+/* Список задач */
 .tasks-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -615,6 +925,7 @@ export default {
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+/* Мета-информация задачи */
 .task-meta {
   display: flex;
   flex-wrap: wrap;
@@ -624,6 +935,7 @@ export default {
   color: #666;
 }
 
+/* Статусы */
 .status {
   padding: 3px 8px;
   border-radius: 4px;
@@ -634,10 +946,12 @@ export default {
   background-color: #FFF3CD;
   color: #856404;
 }
+
 .status-overdue {
   background-color: #f8d7da;
   color: #721c24;
 }
+
 .status-in_progress {
   background-color: #D1ECF1;
   color: #0C5460;
@@ -648,6 +962,17 @@ export default {
   color: #155724;
 }
 
+.status-locked {
+  font-size: 0.8em;
+  color: #6c757d;
+  background-color: #e9ecef;
+  padding: 5px 10px;
+  border-radius: 4px;
+  margin-top: 5px;
+  display: inline-block;
+}
+
+/* Действия с задачами */
 .task-actions {
   display: flex;
   gap: 10px;
@@ -670,21 +995,48 @@ export default {
   background-color: #FFC107;
   color: black;
 }
-.status-locked {
-  font-size: 0.8em;
-  color: #6c757d;
-  background-color: #e9ecef;
-  padding: 5px 10px;
-  border-radius: 4px;
-  margin-top: 5px;
-  display: inline-block;
-}
 
 .share {
   background-color: #9c27b0;
   color: white;
 }
 
+/* Теги */
+.task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 10px 0;
+}
+
+.tag {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.8em;
+  font-weight: 500;
+  color: white;
+}
+
+/* Цвета для тегов */
+.tag-primary { background-color: #007bff; }
+.tag-secondary { background-color: #6c757d; }
+.tag-success { background-color: #28a745; }
+.tag-warning { background-color: #ffc107; color: #000; }
+.tag-danger { background-color: #dc3545; }
+.tag-info { background-color: #17a2b8; }
+
+.no-tags {
+  margin: 10px 0;
+}
+
+.no-tags-text {
+  font-size: 0.9em;
+  color: #6c757d;
+  font-style: italic;
+}
+
+/* Модальные окна */
 .modal {
   position: fixed;
   top: 0;
@@ -700,10 +1052,13 @@ export default {
 
 .modal-content {
   background: white;
-  padding: 20px;
-  border-radius: 8px;
-  width: 500px;
+  padding: 30px;
+  border-radius: 12px;
+  width: 600px;
   max-width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
 .close {
@@ -712,6 +1067,7 @@ export default {
   cursor: pointer;
 }
 
+/* Формы */
 .form-group {
   margin-bottom: 15px;
 }
@@ -776,18 +1132,6 @@ export default {
   100% { transform: rotate(360deg); }
 }
 
-.search-box {
-  margin-bottom: 15px;
-}
-
-.search-box input {
-  width: 100%;
-  padding: 10px 15px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 1em;
-}
-
 .members-list {
   max-height: 300px;
   overflow-y: auto;
@@ -810,6 +1154,17 @@ export default {
 
 .member-item.selected {
   background-color: #e3f2fd;
+}
+
+.member-item.has-task {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.member-item.has-task:hover,
+.member-item.has-task.selected {
+  background-color: #f5f5f5;
 }
 
 .member-avatar {
@@ -847,30 +1202,6 @@ export default {
   text-overflow: ellipsis;
 }
 
-.no-members {
-  padding: 20px;
-  text-align: center;
-  color: #666;
-}
-.member-item.has-task {
-  background-color: #f5f5f5;
-  border-color: #ddd;
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-
-.member-item.has-task:hover {
-  background-color: #f5f5f5;
-  border-color: #ddd;
-}
-
-.member-item.has-task.selected {
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
-  box-shadow: none;
-  animation: none;
-}
-
 .task-assigned {
   color: #28a745;
   font-size: 0.8em;
@@ -882,5 +1213,332 @@ export default {
   color: #6c757d;
   font-size: 0.8em;
   margin: 2px 0 0 0;
+}
+
+.no-members {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+}
+
+/* Стили для выбора тегов при создании */
+.tags-selection {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.available-tags-container {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background-color: #fafafa;
+  margin-bottom: 15px;
+}
+
+.available-tags-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  background-color: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 0.9em;
+  font-weight: 500;
+  color: #666;
+}
+
+.tags-search {
+  flex-shrink: 0;
+}
+
+.tag-search-input {
+  padding: 5px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.85em;
+  width: 150px;
+}
+
+.tag-search-input:focus {
+  outline: none;
+  border-color: #4CAF50;
+}
+
+.available-tags-scrollable {
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Кастомный скроллбар */
+.available-tags-scrollable::-webkit-scrollbar {
+  width: 6px;
+}
+
+.available-tags-scrollable::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.available-tags-scrollable::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.available-tags-scrollable::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Выбираемые теги */
+.tag-selectable {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  font-size: 0.85em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: white;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.tag-selectable:hover {
+  background-color: #f8f9fa;
+  border-color: #bdbdbd;
+  transform: translateY(-1px);
+}
+
+.tag-selectable.selected {
+  background-color: #007bff;
+  color: white;
+  border-color: #007bff;
+  box-shadow: 0 2px 4px rgba(0, 123, 255, 0.2);
+}
+
+.tag-selectable.search-match {
+  background-color: #fff3cd;
+  border-color: #ffc107;
+}
+
+.selected-indicator {
+  font-weight: bold;
+  font-size: 0.9em;
+}
+
+/* Блок кастомных тегов */
+.custom-tags-section {
+  border-top: 1px solid #e0e0e0;
+  padding-top: 15px;
+}
+
+.tag-input-container {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tag-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+.tag-input:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1);
+}
+
+.add-tag-btn {
+  padding: 8px 12px;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.2s;
+}
+
+.add-tag-btn:hover {
+  background-color: #218838;
+}
+
+.custom-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.custom-tags-label {
+  font-size: 0.85em;
+  color: #6c757d;
+  margin-right: 8px;
+  font-weight: 500;
+}
+
+.custom-tag {
+  position: relative;
+  padding: 6px 25px 6px 12px;
+  background-color: #17a2b8;
+  color: white;
+  border-radius: 20px;
+  font-size: 0.85em;
+  display: inline-flex;
+  align-items: center;
+}
+
+.remove-tag {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 1.1em;
+  opacity: 0.8;
+}
+
+.remove-tag:hover {
+  opacity: 1;
+}
+
+.no-tags-available {
+  padding: 10px;
+  text-align: center;
+  color: #6c757d;
+  font-style: italic;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  width: 100%;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+  .filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-select {
+    min-width: auto;
+    width: 100%;
+  }
+
+  .available-tags-header {
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .tags-search {
+    width: 100%;
+  }
+
+  .tag-search-input {
+    width: 100%;
+  }
+
+  .available-tags-scrollable {
+    max-height: 120px;
+  }
+
+  .task-tags {
+    gap: 3px;
+  }
+
+  .tag {
+    font-size: 0.7em;
+    padding: 2px 6px;
+  }
+
+  .tag-selectable {
+    font-size: 0.8em;
+    padding: 3px 8px;
+  }
+}
+.hide-expired-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  user-select: none;
+}
+
+.hide-expired-checkbox input[type="checkbox"] {
+  display: none;
+}
+
+.checkmark {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #4CAF50;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.checkmark:after {
+  content: "✓";
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.hide-expired-checkbox input[type="checkbox"]:checked + .checkmark {
+  background-color: #4CAF50;
+  border-color: #4CAF50;
+}
+
+.hide-expired-checkbox input[type="checkbox"]:checked + .checkmark:after {
+  opacity: 1;
+}
+
+.hide-expired-checkbox:hover .checkmark {
+  border-color: #45a049;
+}
+
+.hide-expired-checkbox input[type="checkbox"]:checked:hover + .checkmark {
+  background-color: #45a049;
+  border-color: #45a049;
+}
+
+/* Стиль для просроченных задач */
+.deadline.expired {
+  color: #dc3545;
+  font-weight: bold;
+}
+
+.expired-badge {
+  background-color: #dc3545;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7em;
+  margin-left: 5px;
+}
+
+/* Адаптивность для нового элемента */
+@media (max-width: 768px) {
+  .hide-expired-checkbox {
+    width: 100%;
+    justify-content: flex-start;
+    margin-top: 10px;
+  }
 }
 </style>

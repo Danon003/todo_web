@@ -128,7 +128,7 @@
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, inject } from 'vue'
 import { useToast } from 'vue-toastification'
 import { useRouter } from 'vue-router'
 import api from "@/api/index.js";
@@ -152,6 +152,32 @@ export default {
       type: 'all'
     })
 
+    // Получаем метод обновления счетчика из родительского компонента
+    const updateNotificationCount = inject('updateNotificationCount', null)
+
+    const updateParentCounter = () => {
+      if (updateNotificationCount) {
+        updateNotificationCount()
+      }
+    }
+
+    // Обновляем методы для вызова updateParentCounter
+    const markAsRead = async (notification) => {
+      if (!userInfo.value) return
+
+      try {
+        if (!notification.read) {
+          await api.markAsReadNotification(notification.id)
+          notification.read = true
+          updateParentCounter() // Обновляем счетчик
+        }
+      } catch (error) {
+        console.error('Ошибка при отметке уведомления как прочитанного:', error)
+        notification.read = true
+        updateParentCounter() // Обновляем счетчик
+        toast.warning('Уведомление отмечено как прочитанное (локально)')
+      }
+    }
 
     const unreadCount = computed(() => {
       return notifications.value.filter(n => !n.read).length
@@ -236,6 +262,8 @@ export default {
       } else {
         notifications.value[existingIndex] = newNotification;
       }
+
+      updateParentCounter()
     }
 
     const fetchNotifications = async () => {
@@ -284,21 +312,6 @@ export default {
       }
     }
 
-    const markAsRead = async (notification) => {
-      if (!userInfo.value) return
-
-      try {
-        if (!notification.read) {
-          await api.markAsReadNotification(notification.id)
-          notification.read = true
-        }
-      } catch (error) {
-        console.error('Ошибка при отметке уведомления как прочитанного:', error)
-        notification.read = true
-        toast.warning('Уведомление отмечено как прочитанное (локально)')
-      }
-    }
-
     const markAllAsRead = async () => {
       if (!userInfo.value) return
 
@@ -307,12 +320,14 @@ export default {
         notifications.value.forEach(notification => {
           notification.read = true
         })
+        updateParentCounter() // Обновляем счетчик
         toast.success('Все уведомления отмечены как прочитанные')
       } catch (error) {
         console.error('Ошибка при отметке всех уведомлений:', error)
         notifications.value.forEach(notification => {
           notification.read = true
         })
+        updateParentCounter() // Обновляем счетчик
         toast.success('Все уведомления отмечены как прочитанные (локально)')
       }
     }

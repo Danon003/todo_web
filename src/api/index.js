@@ -13,6 +13,9 @@ api.interceptors.request.use(config => {
     if (token) {
         config.headers.Authorization = `Bearer ${token}`
     }
+    if (config.data instanceof FormData) {
+        delete config.headers['Content-Type']
+    }
     return config
 })
 
@@ -26,6 +29,13 @@ export default {
     },
     register(userData) {
         return api.post('/auth/registration', userData)
+    },
+    forgotPassword (email)  {
+        return api.post('/auth/forgot-password', {email} )
+    },
+
+    resetPassword (data)  {
+        return api.post('/auth/reset-password', data)
     },
 
     // Tasks
@@ -66,6 +76,54 @@ export default {
     getUsersWithTask(taskId) {
         return api.get(`/task/getListTask/${taskId}`)
     },
+    getAvailableTags() {
+        return api.get('/tag')
+    },
+    // Создать новый тег
+    createTag (tagData) {
+        return api.post('/tags', {tagData});
+    },
+
+    updateTask (taskId, taskData) {
+        return api.put(`/task/${taskId}`, taskData)
+    },
+
+    uploadTaskFile (taskId, formData) {
+        return api.post(`/minio/tasks/${taskId}/files`, formData)
+    },
+    getTaskFiles (taskId) {
+        return api.get(`/minio/tasks/${taskId}/files`)
+    },
+    deleteTaskFile (taskId, fileId) {
+        return api.delete(`/minio/tasks/${taskId}/files/${fileId}`)
+    },
+    getFileDownloadUrl(taskId, fileId) {
+        return api.get(`/minio/tasks/${taskId}/files/${fileId}/download`)
+    },
+
+    // Solutions API
+    getTaskSolutions (taskId) {
+        return api.get(`/minio/tasks/${taskId}/solution/all`)
+    },
+    downloadStudentSolution (taskId, studentId) {
+        return api.get(`/minio/tasks/${taskId}/solution/${studentId}/download`)
+    },
+    gradeSolution (taskId, studentId, data) {
+        return api.put(`/minio/tasks/${taskId}/solution/${studentId}/grade`, data)
+    },
+    getStudentSolution(taskId) {
+        return api.get(`/minio/tasks/${taskId}/solution`)
+    },
+
+// Student solutions API
+    uploadStudentSolution (taskId, formData) {
+        return api.post(`/minio/tasks/${taskId}/solution`, formData, {
+            headers: {'Content-Type': 'multipart/form-data'}
+        })
+    },
+    deleteStudentSolution (taskId) {
+        return api.delete(`/minio/tasks/${taskId}/solution`);
+    },
 
     // Groups
     getGroups() {
@@ -97,7 +155,7 @@ export default {
         return api.delete(`/group/${groupId}/students/${studentId}`)
     },
     getGroupData(){
-      return api.get('/user/my-group')
+        return api.get('/user/my-group')
     },
     assignTeacherToGroup(id, id2) {
         return api.put(`/admin/${id}/teacher/${id2}`, {})
@@ -123,7 +181,7 @@ export default {
         return api.get(`/admin/users/by-role?role=${role}`)
     },
     getRoleAuditLog(){
-      return api.get('admin/role-audit-log')
+        return api.get('admin/role-audit-log')
     },
     getMyUsers(){
         return api.get('/group/my-students')
@@ -135,6 +193,9 @@ export default {
     getUserInfo() {
         return api.get('/user/me/info')
     },
+    updateUserProfile(userData) {
+        return api.put('/user/me/update', userData)
+    },
     getStudentTasks(userId) {
         return api.get(`/task/student/${userId}`);
     },
@@ -143,6 +204,27 @@ export default {
         return api.get('/admin/statistic');
     },
 
+    getTaskComments (taskId) {
+        return api.get(`/task/${taskId}/comments`)
+    },
+    createComment (taskId, commentData) {
+        return api.post(`/task/${taskId}/comments`, commentData)
+    },
+    updateComment (taskId, commentId, content) {
+        return api.put(`/task/${taskId}/comments/${commentId}`, {content})
+    },
+    deleteComment (taskId, commentId) {
+        return api.delete(`/task/${taskId}/comments/${commentId}`)
+    },
+    getCommentReplies (taskId, commentId) {
+        return api.get(`/task/${taskId}/comments/${commentId}/replies`)
+    },
+
+    generateReport: (options) => {
+        return api.post('/reports/generate', options, {
+            responseType: 'blob'
+        })
+    },
 
     getNotification: (params) => axios.get(`${NOTIFICATION_API}/notifications`, {
         params: {
@@ -174,5 +256,10 @@ export default {
         params: { userId: localStorage.getItem('userId') },
         headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
     }),
+
+
+    getStudentSolutionDownloadUrl(taskId) {
+        return api.get(`/minio/tasks/${taskId}/solution/download`)
+    },
 
 }
