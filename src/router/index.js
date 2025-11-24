@@ -11,6 +11,7 @@ import Users from "@/views/profile/Users.vue";
 import Calendar from "@/views/profile/Calendar.vue";
 import MyGroup from "@/views/profile/my-group.vue";
 import Notifications from "@/views/profile/Notifications.vue";
+import VideoMeetings from "@/views/profile/VideoMeetings.vue";
 
 const routes = [
     {
@@ -79,6 +80,12 @@ const routes = [
                 path: '/profile/notifications',
                 name: 'notifications',
                 component: Notifications,
+                meta: { requiresAuth: true, roles: ['ROLE_ADMIN', 'ROLE_TEACHER', 'ROLE_STUDENT'] }
+            },
+            {
+                path: '/profile/video-meetings',
+                name: 'video-meetings',
+                component: VideoMeetings,
                 meta: { requiresAuth: true, roles: ['ROLE_ADMIN', 'ROLE_TEACHER', 'ROLE_STUDENT'] }
             }
         ]

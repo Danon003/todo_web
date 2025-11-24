@@ -262,4 +262,32 @@ export default {
         return api.get(`/minio/tasks/${taskId}/solution/download`)
     },
 
+    // Video Meetings
+    getVideoMeetings() {
+        return api.get('/video-meetings')
+    },
+    getMyVideoMeetings() {
+        return api.get('/video-meetings/my-meetings')
+    },
+    getVideoMeetingsByGroup(groupId) {
+        return api.get(`/video-meetings/group/${groupId}`)
+    },
+    getVideoMeeting(meetingId) {
+        return api.get(`/video-meetings/${meetingId}`)
+    },
+    createVideoMeeting(meetingData) {
+        return api.post('/video-meetings', meetingData)
+    },
+    updateVideoMeeting(meetingId, meetingData) {
+        return api.put(`/video-meetings/${meetingId}`, meetingData)
+    },
+    deleteVideoMeeting(meetingId) {
+        return api.delete(`/video-meetings/${meetingId}`)
+    },
+    getVideoMeetingJoinUrl(meetingId) {
+        return api.get(`/video-meetings/${meetingId}/join`)
+    },
+    getVideoMeetingEmbed(meetingId) {
+        return axios.get(`/video-meetings/${meetingId}/embed`)
+    },
 }

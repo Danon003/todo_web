@@ -80,6 +80,7 @@
             <span v-else-if="notification.type === 'TASK_DEADLINE_12H'">⏰</span>
             <span v-else-if="notification.type === 'CHANGE_ROLE'">⚙️</span>
             <span v-else-if="notification.type === 'SYSTEM'">⚙️</span>
+            <span v-else-if="notification.type === 'VIDEO_MEETING_CREATED'">📹</span>
 
             <span v-else>🔔</span>
           </div>
@@ -396,6 +397,7 @@ export default {
         'CHANGE_ROLE': 'Новая роль',
         'TEACHER_REMOVED': 'Наставничество',
         'TEACHER_ASSIGN': 'Наставничество',
+        'VIDEO_MEETING_CREATED': 'Видеоконференция'
       }
       return typeMap[type] || type
     }
