@@ -450,9 +450,9 @@
     <div class="comments-section">
       <div class="comments-header">
         <h3>💬 Комментарии</h3>
-        <span class="comments-count" v-if="comments.length > 0">
-      {{ comments.length }} {{ getCommentWord(comments.length) }}
-    </span>
+        <span class="comments-count" v-if="commentsTotalElements > 0">
+          {{ commentsTotalElements }} {{ getCommentWord(commentsTotalElements) }}
+        </span>
       </div>
 
       <!-- Список комментариев -->
@@ -560,8 +560,42 @@
         </div>
       </div>
 
+      <!-- Пагинация комментариев -->
+      <div
+          v-if="commentsTotalPages > 1"
+          class="pagination comments-pagination"
+      >
+        <button
+            class="pagination-btn"
+            @click="prevCommentsPage"
+            :disabled="commentsPage === 1 || commentsLoading"
+        >
+          ← Назад
+        </button>
+        <span class="pagination-info">
+          Страница {{ commentsPage }} из {{ commentsTotalPages }}
+          (всего: {{ commentsTotalElements }} {{ getCommentWord(commentsTotalElements) }})
+        </span>
+        <button
+            class="pagination-btn"
+            @click="nextCommentsPage"
+            :disabled="commentsPage === commentsTotalPages || commentsLoading"
+        >
+          Вперёд →
+        </button>
+        <select
+            v-model="commentsPageSize"
+            @change="changeCommentsPageSize"
+            class="page-size-select"
+        >
+          <option :value="10">10 на странице</option>
+          <option :value="20">20 на странице</option>
+          <option :value="50">50 на странице</option>
+        </select>
+      </div>
+
       <!-- Сообщение об отсутствии комментариев -->
-      <div v-else class="no-comments">
+      <div v-if="comments.length === 0 && !commentsLoading" class="no-comments">
         <p>Пока нет комментариев. Будьте первым!</p>
       </div>
 
@@ -759,6 +793,9 @@ export default {
     const studentAssignmentLoading = ref(false);
     const comments = ref([]);
     const commentsLoading = ref(false);
+    const commentsPage = ref(1);
+    const commentsPageSize = ref(20);
+    const commentsTotalElements = ref(0);
     const newCommentText = ref('');
     const addingComment = ref(false);
     const editingCommentId = ref(null);
@@ -865,8 +902,13 @@ export default {
         const usersResponse = await api.getUsersWithTask(route.params.taskId);
         usersWithTask.value = usersResponse.data;
 
-        const groupsResponse = await api.getGroups();
-        const allGroups = groupsResponse.data;
+        const groupsResponse = await api.getGroups(0, 1000); // Загружаем все группы
+        const groupsData = groupsResponse.data;
+
+        // Обрабатываем пагинированный ответ
+        const allGroups = (groupsData && Array.isArray(groupsData.content))
+            ? groupsData.content
+            : (Array.isArray(groupsData) ? groupsData : []);
 
         groupsWithTask.value = [];
         groupStudents.value = {};
@@ -1134,9 +1176,20 @@ export default {
       ).length;
     };
 
-    const assignToOthers = () => {
+    const assignToOthers = async () => {
       selectedGroupId.value = null;
-      fetchGroups();
+      await fetchGroups();
+      // Загружаем студентов для всех групп при открытии модалки
+      for (const group of groups.value) {
+        if (!groupStudents.value[group.id]) {
+          try {
+            const groupUsersResponse = await api.getGroupStudents(group.id);
+            groupStudents.value[group.id] = groupUsersResponse.data;
+          } catch (error) {
+            groupStudents.value[group.id] = [];
+          }
+        }
+      }
       showGroupModal.value = true;
     };
 
@@ -1150,10 +1203,19 @@ export default {
     const fetchGroups = async () => {
       groupsLoading.value = true;
       try {
-        const response = await api.getGroups();
-        groups.value = response.data;
+        const response = await api.getGroups(0, 1000); // Загружаем все группы для модалки
+        const data = response.data;
+
+        if (data && Array.isArray(data.content)) {
+          groups.value = data.content;
+        } else if (Array.isArray(data)) {
+          groups.value = data;
+        } else {
+          groups.value = [];
+        }
       } catch (error) {
         showToast('Не удалось загрузить список групп', 'error');
+        groups.value = [];
       } finally {
         groupsLoading.value = false;
       }
@@ -1440,14 +1502,55 @@ export default {
     const fetchComments = async () => {
       commentsLoading.value = true;
       try {
-        const response = await api.getTaskComments(route.params.taskId);
-        comments.value = response.data;
+        const response = await api.getTaskComments(
+            route.params.taskId,
+            commentsPage.value - 1,
+            commentsPageSize.value
+        );
+
+        const data = response.data;
+        if (data && Array.isArray(data.content)) {
+          comments.value = data.content;
+          commentsTotalElements.value = data.totalElements ?? data.content.length;
+        } else if (Array.isArray(data)) {
+          // Обратная совместимость, если бэкенд вернет просто список
+          comments.value = data;
+          commentsTotalElements.value = data.length;
+        } else {
+          comments.value = [];
+          commentsTotalElements.value = 0;
+        }
       } catch (error) {
         console.error('Ошибка при загрузке комментариев:', error);
         showToast('Не удалось загрузить комментарии', 'error');
       } finally {
         commentsLoading.value = false;
       }
+    };
+
+    const commentsTotalPages = computed(() => {
+      return commentsPageSize.value > 0
+          ? Math.ceil(commentsTotalElements.value / commentsPageSize.value)
+          : 0;
+    });
+
+    const nextCommentsPage = () => {
+      if (commentsPage.value < commentsTotalPages.value) {
+        commentsPage.value += 1;
+        fetchComments();
+      }
+    };
+
+    const prevCommentsPage = () => {
+      if (commentsPage.value > 1) {
+        commentsPage.value -= 1;
+        fetchComments();
+      }
+    };
+
+    const changeCommentsPageSize = () => {
+      commentsPage.value = 1;
+      fetchComments();
     };
 
     const addComment = async () => {
@@ -1575,6 +1678,7 @@ export default {
       if (user.role === 'ROLE_STUDENT') {
         await fetchStudentSolution();
       }
+
       await fetchComments();
     });
 
@@ -1665,6 +1769,9 @@ export default {
       solutions,
       comments,
       commentsLoading,
+      commentsPage,
+      commentsPageSize,
+      commentsTotalElements,
       newCommentText,
       addingComment,
       editingCommentId,
@@ -1689,6 +1796,7 @@ export default {
       cancelDeleteComment,
       showDeleteCommentConfirm,
       commentToDelete,
+
 
     };
   }
@@ -1739,7 +1847,48 @@ export default {
   margin-left: 15px;
   opacity: 0.8;
 }
+.header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
 
+.clear-overdue-btn {
+  background-color: #dc3545;
+  color: white;
+  padding: 8px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.clear-overdue-btn:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
+.clear-overdue-btn:disabled {
+  background-color: #e9a2aa;
+  cursor: not-allowed;
+}
+
+.priority-select {
+  margin: 0;
+}
+
+.priority-selector {
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.priority-selector:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .toast-close:hover {
   opacity: 1;
 }
@@ -1769,7 +1918,7 @@ export default {
 }
 
 .modal-content {
-  background: white;
+  background: var(--bg-card);
   padding: 30px;
   border-radius: 12px;
   width: 600px;
@@ -1782,17 +1931,17 @@ export default {
 
 .modal-content h3 {
   margin: 0 0 20px 0;
-  color: #333;
+  color: var(--text-primary);
   font-size: 1.5em;
   font-weight: 600;
   text-align: center;
   padding-bottom: 15px;
-  border-bottom: 2px solid #e9ecef;
+  border-bottom: 2px solid var(--border-color);
 }
 
 .modal-content p {
   margin: 0 0 20px 0;
-  color: #666;
+  color: var(--text-secondary);
   line-height: 1.6;
   text-align: center;
 }
@@ -1833,6 +1982,8 @@ export default {
   padding: 20px;
   max-width: 800px;
   margin: 0 auto;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .loading,
@@ -1865,7 +2016,7 @@ export default {
 }
 
 .task-info {
-  background: #f8f9fa;
+  background: var(--bg-secondary);
   padding: 15px;
   border-radius: 8px;
   margin-bottom: 20px;
@@ -2097,13 +2248,13 @@ export default {
   cursor: pointer;
   transition: all 0.2s ease;
   border: 1px solid #e0e0e0;
-  background-color: #fff;
+  background-color: var(--bg-card);
 }
 
 .group-item:hover,
 .student-item:hover {
-  background-color: #f5f5f5;
-  border-color: #bdbdbd;
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color);
 }
 
 .group-item.selected,
@@ -2356,7 +2507,7 @@ export default {
 
 .attached-files h4 {
   margin-bottom: 10px;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .file-item,
@@ -2365,7 +2516,7 @@ export default {
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: #f8f9fa;
+  background: var(--bg-secondary);
   border-radius: 4px;
   margin-bottom: 5px;
 }
@@ -2405,30 +2556,30 @@ export default {
 }
 
 .student-solution-section {
-  background: #f8f9fa;
+  background: var(--bg-secondary);
   border-radius: 12px;
   padding: 24px;
   margin: 20px 0;
-  border: 1px solid #e9ecef;
+  border: 1px solid var(--border-color);
 }
 
 .solution-header h3 {
   margin: 0 0 8px 0;
-  color: #2c3e50;
+  color: var(--text-primary);
   font-size: 1.4em;
 }
 
 .solution-description {
-  color: #6c757d;
+  color: var(--text-secondary);
   margin: 0;
   font-size: 0.95em;
 }
 
 .solution-uploaded {
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
   padding: 20px;
-  border: 1px solid #d1ecf1;
+  border: 1px solid var(--border-color);
 }
 
 .uploaded-header {
@@ -2446,12 +2597,12 @@ export default {
 }
 
 .upload-date {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.9em;
 }
 
 .solution-file-card {
-  background: #f8f9fa;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 20px;
@@ -2480,11 +2631,11 @@ export default {
 
 .file-name {
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .file-size {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.85em;
 }
 
@@ -2523,22 +2674,22 @@ export default {
 }
 
 .teacher-feedback {
-  background: #fff3cd;
-  border: 1px solid #ffeaa7;
+  background: var(--task-not-started);
+  border: 1px solid var(--color-warning);
   border-radius: 8px;
   padding: 16px;
 }
 
 .teacher-feedback h5 {
   margin: 0 0 12px 0;
-  color: #856404;
+  color: var(--task-not-started-text);
 }
 
 .grade-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: white;
+  background: var(--bg-card);
   padding: 8px 12px;
   border-radius: 20px;
   margin-bottom: 12px;
@@ -2556,35 +2707,35 @@ export default {
 }
 
 .comment-box {
-  background: white;
+  background: var(--bg-card);
   padding: 12px;
   border-radius: 6px;
-  border-left: 4px solid #17a2b8;
+  border-left: 4px solid var(--color-primary);
 }
 
 .comment-label {
   display: block;
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.9em;
   margin-bottom: 4px;
 }
 
 .comment-text {
   margin: 0;
-  color: #2c3e50;
+  color: var(--text-primary);
   line-height: 1.4;
 }
 
 .waiting-feedback {
   text-align: center;
   padding: 20px;
-  color: #6c757d;
-  background: #f8f9fa;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
   border-radius: 8px;
 }
 
 .solution-upload {
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
   padding: 20px;
 }
@@ -2610,30 +2761,30 @@ export default {
 }
 
 .upload-zone {
-  border: 2px dashed #dee2e6;
+  border: 2px dashed var(--border-color);
   border-radius: 12px;
   padding: 40px 20px;
   text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: #fafafa;
+  background: var(--bg-secondary);
   margin-bottom: 16px;
 }
 
 .upload-zone:hover {
-  border-color: #007bff;
-  background: #f0f8ff;
+  border-color: var(--color-primary);
+  background: var(--bg-hover);
   transform: translateY(-2px);
 }
 
 .upload-content h4 {
   margin: 0 0 8px 0;
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .upload-content p {
   margin: 0 0 12px 0;
-  color: #6c757d;
+  color: var(--text-secondary);
 }
 
 .upload-icon {
@@ -2648,12 +2799,12 @@ export default {
 }
 
 .upload-hint small {
-  color: #868e96;
+  color: var(--text-muted);
 }
 
 .file-preview-card {
-  background: #e7f3ff;
-  border: 1px solid #b3d9ff;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 0;
   overflow: hidden;
@@ -2664,13 +2815,13 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  background: #d1ecf1;
-  border-bottom: 1px solid #bee5eb;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .preview-title {
   font-weight: 600;
-  color: #0c5460;
+  color: var(--text-primary);
 }
 
 .remove-preview-btn {
@@ -2732,10 +2883,10 @@ export default {
   justify-content: space-between;
   align-items: flex-start;
   padding: 15px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   margin-bottom: 10px;
-  background: #fafafa;
+  background: var(--bg-card);
 }
 
 .student-info {
@@ -2749,7 +2900,7 @@ export default {
 
 .student-details h4 {
   margin: 0 0 8px 0;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .solution-file, .no-solution {
@@ -2760,7 +2911,7 @@ export default {
 }
 
 .no-solution-text {
-  color: #666;
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -2772,43 +2923,48 @@ export default {
 }
 
 .grade-input, .comment-input {
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   padding: 12px;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
   text-align: start;
   gap: 5px;
+  background: var(--bg-secondary);
 }
 
 .grade-field {
   width: 80px;
   padding: 5px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .comment-field {
   width: 200px;
   height: 60px;
   padding: 5px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   resize: vertical;
   font-size: 0.9em;
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .no-solutions {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: var(--text-muted);
   font-style: italic;
 }
 /* Стили для комментариев */
 .comments-section {
   margin-top: 30px;
   padding-top: 20px;
-  border-top: 2px solid #e9ecef;
+  border-top: 2px solid var(--border-color);
 }
 
 .comments-header {
@@ -2820,11 +2976,11 @@ export default {
 
 .comments-header h3 {
   margin: 0;
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .comments-count {
-  background: #007bff;
+  background: var(--color-primary);
   color: white;
   padding: 4px 12px;
   border-radius: 20px;
@@ -2841,14 +2997,15 @@ export default {
   gap: 12px;
   margin-bottom: 20px;
   padding: 16px;
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
-  border: 1px solid #e9ecef;
+  border: 1px solid var(--border-color);
   transition: box-shadow 0.2s;
 }
 
 .comment-item:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary);
 }
 
 .comment-avatar {
@@ -2887,29 +3044,29 @@ export default {
 
 .comment-author {
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .comment-role {
   font-size: 0.8em;
   padding: 2px 8px;
   border-radius: 12px;
-  background: #e9ecef;
-  color: #6c757d;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
 }
 
 .role-teacher {
-  background: #e1bee7;
-  color: #7b1fa2;
+  background: rgba(156, 39, 176, 0.2);
+  color: var(--color-primary);
 }
 
 .role-admin {
-  background: #ffcdd2;
-  color: #c62828;
+  background: rgba(244, 67, 54, 0.2);
+  color: var(--color-danger);
 }
 
 .comment-time {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.9em;
 }
 
@@ -2934,7 +3091,7 @@ export default {
 .comment-edit-btn:hover,
 .comment-delete-btn:hover {
   opacity: 1;
-  background: #f8f9fa;
+  background: var(--bg-hover);
 }
 
 .comment-edit {
@@ -2944,17 +3101,19 @@ export default {
 .comment-edit-input {
   width: 100%;
   padding: 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   font-family: inherit;
   font-size: 0.95em;
   resize: vertical;
   margin-bottom: 8px;
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .comment-edit-input:focus {
   outline: none;
-  border-color: #007bff;
+  border-color: var(--color-primary);
 }
 
 .comment-edit-actions {
@@ -2982,7 +3141,7 @@ export default {
 }
 
 .comment-text {
-  color: #2c3e50;
+  color: var(--text-primary);
   line-height: 1.5;
   white-space: pre-wrap;
 }
@@ -2990,34 +3149,34 @@ export default {
 .comment-replies-info {
   margin-top: 12px;
   padding-top: 8px;
-  border-top: 1px solid #f1f3f4;
+  border-top: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .replies-count {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.9em;
 }
 
 .show-replies-btn {
   background: none;
   border: none;
-  color: #007bff;
+  color: var(--color-primary);
   cursor: pointer;
   font-size: 0.9em;
   text-decoration: underline;
 }
 
 .show-replies-btn:hover {
-  color: #0056b3;
+  color: var(--color-primary-dark);
 }
 
 .comment-replies {
   margin-top: 12px;
   padding-left: 20px;
-  border-left: 3px solid #e9ecef;
+  border-left: 3px solid var(--border-color);
 }
 
 .comment-reply {
@@ -3025,7 +3184,7 @@ export default {
   gap: 12px;
   margin-bottom: 12px;
   padding: 12px;
-  background: #f8f9fa;
+  background: var(--bg-secondary);
   border-radius: 8px;
 }
 
@@ -3058,7 +3217,7 @@ export default {
 
 .reply-author {
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary);
   font-size: 0.9em;
 }
 
@@ -3066,12 +3225,12 @@ export default {
   font-size: 0.75em;
   padding: 1px 6px;
   border-radius: 10px;
-  background: #e9ecef;
-  color: #6c757d;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
 }
 
 .reply-time {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.8em;
 }
 
@@ -3082,7 +3241,7 @@ export default {
 }
 
 .reply-text {
-  color: #495057;
+  color: var(--text-primary);
   line-height: 1.4;
   font-size: 0.9em;
   white-space: pre-wrap;
@@ -3091,17 +3250,17 @@ export default {
 .no-comments {
   text-align: center;
   padding: 40px;
-  color: #6c757d;
-  background: #f8f9fa;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
   border-radius: 8px;
   margin-bottom: 20px;
 }
 
 .add-comment {
-  background: white;
+  background: var(--bg-card);
   padding: 20px;
   border-radius: 8px;
-  border: 1px solid #e9ecef;
+  border: 1px solid var(--border-color);
 }
 
 .comment-input-container {
@@ -3111,27 +3270,29 @@ export default {
 .comment-input {
   width: 100%;
   padding: 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   font-family: inherit;
   font-size: 0.95em;
   resize: vertical;
   transition: border-color 0.2s;
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .comment-input:focus {
   outline: none;
-  border-color: #007bff;
+  border-color: var(--color-primary);
 }
 
 .comment-input-hint {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.8em;
   margin-top: 4px;
 }
 
 .send-comment-btn {
-  background: #007bff;
+  background: var(--color-primary);
   color: white;
   border: none;
   padding: 10px 20px;
@@ -3142,7 +3303,7 @@ export default {
 }
 
 .send-comment-btn:hover:not(:disabled) {
-  background: #0056b3;
+  background: var(--color-primary-dark);
 }
 
 .send-comment-btn:disabled {
@@ -3150,7 +3311,7 @@ export default {
   cursor: not-allowed;
 }
 .modal-content {
-  background: white;
+  background: var(--bg-card);
   padding: 30px;
   border-radius: 12px;
   width: 600px;
@@ -3158,18 +3319,19 @@ export default {
   max-height: 90vh;
   overflow-y: auto;
   text-align: center;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-color);
 }
 
 .modal-content h3 {
   margin: 0 0 15px 0;
-  color: #dc3545;
+  color: var(--color-danger);
   font-size: 1.3rem;
 }
 
 .modal-content p {
   margin: 0 0 20px 0;
-  color: #666;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 

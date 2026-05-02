@@ -8,9 +8,22 @@
 
     <div class="tasks-header">
       <h2>Задачи</h2>
-      <button v-if="user.role === 'ROLE_TEACHER'" @click="showCreateModal = true" class="create-btn">
+      <div class="header-actions">
+        <button v-if="user.role === 'ROLE_TEACHER'" @click="showCreateModal = true" class="create-btn">
         Создать задачу
-      </button>
+        </button>
+        <button v-if="user.role === 'ROLE_STUDENT'"
+              @click="clearOverdueTasks"
+              class="clear-overdue-btn"
+              :disabled="clearOverdueTasks">
+        🗑️ Очистить просроченные
+        </button>
+        <button v-if="user.role === 'ROLE_TEACHER'"
+                @click="openBulkAssignModal"
+                class="action-btn bulk-assign">
+          Массовое назначение
+        </button>
+      </div>
     </div>
 
     <div class="filters">
@@ -30,10 +43,10 @@
         <input
             type="checkbox"
             v-model="hideExpiredTasks"
-            @change="applyExpiredFilter"
+            @change="onHideExpiredChange"
         >
         <span class="checkmark"></span>
-        Скрыть прошедшие задачи
+        Скрыть просроченные задачи
       </label>
     </div>
 
@@ -68,20 +81,22 @@
         </div>
         <div class="task-actions">
           <button @click="viewTask(task.id)" class="action-btn view">Просмотр</button>
-          <button
-              v-if="user.role === 'ROLE_STUDENT' && !isTaskExpired(task)"
-              @click="openStatusModal(task)"
-              class="action-btn update"
-          >
-            Обновить статус
-          </button>
-
-          <span
-              v-else-if="user.role === 'ROLE_STUDENT' && isTaskExpired(task)"
-              class="status-locked"
-          >
-            Статус недоступен
-          </span>
+          <div v-if="user.role === 'ROLE_STUDENT' && !isTaskExpired(task)" class="priority-select">
+            <select
+                v-model="task.priority"
+                @change="changePriority(task)"
+                class="priority-selector"
+                :class="{
+                      'priority-high': task.priority === 'HIGH',
+                      'priority-medium': task.priority === 'MEDIUM',
+                       'priority-low': task.priority === 'LOW'
+                     }"
+                >
+              <option value="HIGH">🔴 Высокий</option>
+              <option value="MEDIUM">🟡 Средний</option>
+              <option value="LOW">🟢 Низкий</option>
+            </select>
+          </div>
           <button
               v-if="user.role === 'ROLE_STUDENT' && !isTaskExpired(task)"
               @click="openShareModal(task)"
@@ -100,7 +115,82 @@
       </div>
     </div>
 
-    <!-- Модальное окно создания задачи с тегами -->
+    <div
+        v-if="tasksTotalPages > 1"
+        class="pagination tasks-pagination"
+    >
+      <button
+          class="pagination-btn"
+          @click="prevTasksPage"
+          :disabled="tasksCurrentPage === 1"
+      >
+        ← Назад
+      </button>
+      <span class="pagination-info">
+        Страница {{ tasksCurrentPage }} из {{ tasksTotalPages }}
+        (всего: {{ tasksTotalElements }} задач)
+      </span>
+      <button
+          class="pagination-btn"
+          @click="nextTasksPage"
+          :disabled="tasksCurrentPage === tasksTotalPages"
+      >
+        Вперёд →
+      </button>
+      <select
+          v-model="tasksPageSize"
+          @change="changeTasksPageSize"
+          class="page-size-select"
+      >
+        <option :value="10">10 на странице</option>
+        <option :value="20">20 на странице</option>
+        <option :value="50">50 на странице</option>
+      </select>
+    </div>
+
+    <!-- Модальное окно массового назначения -->
+    <div v-if="showBulkAssignModal" class="modal" @click.self="closeBulkAssignModal">
+      <div class="modal-content large-modal">
+        <span class="close" @click="closeBulkAssignModal">&times;</span>
+        <h3>Массовое назначение задач</h3>
+
+        <!-- Выбор задач -->
+        <div class="form-group">
+          <label>Выберите задачи:</label>
+          <div class="tasks-list-select">
+            <div v-for="task in availableTasks" :key="task.id" class="task-select-item">
+              <label>
+                <input type="checkbox" v-model="selectedTaskIds" :value="task.id">
+                {{ task.title }} (Дедлайн: {{ formatDate(task.deadline) }})
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Выбор групп -->
+        <label>Выберите группы:</label>
+        <div class="groups-list-select">
+          <div v-for="group in availableGroups" :key="group.id" class="group-select-item">
+            <label>
+              <input type="checkbox" v-model="selectedGroupIds" :value="group.id">
+              {{ group.name }}
+            </label>
+          </div>
+        </div>
+      </div><div class="form-group">
+
+
+        <div class="form-actions">
+          <button @click="closeBulkAssignModal" class="cancel-btn">Отмена</button>
+          <button @click="executeBulkAssign" class="submit-btn"
+                  :disabled="bulkAssignLoading || selectedTaskIds.length === 0 || selectedGroupIds.length === 0">
+            {{ bulkAssignLoading ? 'Назначение...' : `Назначить ${selectedTaskIds.length} задач ${selectedGroupIds.length} группам` }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно создания задачи -->
     <div v-if="showCreateModal" class="modal" @click.self="showCreateModal = false">
       <div class="modal-content">
         <span class="close" @click="showCreateModal = false">&times;</span>
@@ -118,15 +208,6 @@
             <label>Дедлайн:</label>
             <input v-model="newTask.deadline" type="datetime-local" required>
           </div>
-          <div class="form-group">
-            <label>Приоритет:</label>
-            <select v-model="newTask.priority" required>
-              <option value="LOW">Низкий</option>
-              <option value="MEDIUM">Средний</option>
-              <option value="HIGH">Высокий</option>
-            </select>
-          </div>
-
           <!-- Блок тегов при создании -->
           <div class="form-group">
             <label>Теги:</label>
@@ -198,31 +279,6 @@
       </div>
     </div>
 
-    <!-- Модальное окно изменения статуса -->
-    <div v-if="showStatusModal" class="modal" @click.self="showStatusModal = false">
-      <div class="modal-content">
-        <span class="close" @click="showStatusModal = false">&times;</span>
-        <h3>Изменить статус задачи</h3>
-        <form @submit.prevent="updateTaskStatus">
-          <div class="form-group">
-            <label>Текущий статус:</label>
-            <span class="current-status" :class="'status-' + currentTask.userStatus.toLowerCase()">
-              {{ getStatusText(currentTask.userStatus) }}
-            </span>
-          </div>
-          <div class="form-group">
-            <label>Новый статус:</label>
-            <select v-model="selectedStatus" required>
-              <option value="NOT_STARTED">Не начата</option>
-              <option value="IN_PROGRESS">В процессе</option>
-              <option value="COMPLETED">Завершена</option>
-            </select>
-          </div>
-          <button type="submit" class="submit-btn">Обновить</button>
-        </form>
-      </div>
-    </div>
-
     <div v-if="showShareModal" class="modal" @click.self="showShareModal = false">
       <div class="modal-content">
         <span class="close" @click="showShareModal = false">&times;</span>
@@ -289,10 +345,12 @@ export default {
   setup() {
     const router = useRouter();
     const tasks = ref([]);
+    const tasksCurrentPage = ref(1);
+    const tasksPageSize = ref(20);
+    const tasksTotalElements = ref(0);
     const filterStatus = ref('all');
     const sortField = ref('deadline');
     const showCreateModal = ref(false);
-    const showStatusModal = ref(false);
     const showShareModal = ref(false);
     const currentTask = ref({});
     const selectedStatus = ref('NOT_STARTED');
@@ -303,7 +361,11 @@ export default {
     const availableTags = ref([]);
     const selectedTagFilter = ref('');
     const tagSearch = ref('');
-    const hideExpiredTasks = ref(false);
+    const hideExpiredTasks = ref(true);
+    const showPriorityModal = ref(false);
+    const selectedPriority = ref('MEDIUM');
+    const clearingOverdue = ref(false);
+    const updatingPriority = ref(false);
     const filteredAvailableTags = computed(() => {
       if (!tagSearch.value) {
         return availableTags.value;
@@ -321,6 +383,100 @@ export default {
       type: 'success'
     });
 
+    const showBulkAssignModal = ref(false)
+    const availableTasks = ref([])
+    const availableGroups = ref([])
+    const selectedTaskIds = ref([])
+    const selectedGroupIds = ref([])
+    const bulkAssignLoading = ref(false)
+
+    const openBulkAssignModal = async () => {
+      // Загружаем доступные задачи и группы
+      await Promise.all([
+        fetchAvailableTasks(),
+        fetchAvailableGroups()
+      ])
+      selectedTaskIds.value = []
+      selectedGroupIds.value = []
+      showBulkAssignModal.value = true
+    }
+
+    // const fetchAvailableTasks = async () => {
+    //   try {
+    //     const response = await api.getTasks(0, 100) // Загружаем все задачи для выбора
+    //     const data = response.data
+    //     availableTasks.value = data.content || data || []
+    //   } catch (error) {
+    //     showToast('Не удалось загрузить задачи', 'error')
+    //   }
+    // }
+
+    const fetchAvailableTasks = async () => {
+      try {
+        const response = await api.getActiveTasks(0, 20) // Загружаем все задачи для выбора
+        const data = response.data
+        availableTasks.value = data.content || data || []
+      } catch (error) {
+        showToast('Не удалось загрузить задачи', 'error')
+      }
+    }
+
+    const fetchAvailableGroups = async () => {
+      try {
+        const response = await api.getGroups(0, 100)
+        const data = response.data
+        availableGroups.value = data.content || data || []
+      } catch (error) {
+        showToast('Не удалось загрузить группы', 'error')
+      }
+    }
+
+    const executeBulkAssign = async () => {
+      if (selectedTaskIds.value.length === 0 || selectedGroupIds.value.length === 0) {
+        showToast('Выберите хотя бы одну задачу и одну группу', 'warning')
+        return
+      }
+
+      bulkAssignLoading.value = true
+      try {
+        const response = await api.bulkAssignToGroups(
+            selectedTaskIds.value,
+            selectedGroupIds.value
+        )
+        showToast(`Назначено: ${response.data.created} задач, пропущено: ${response.data.skipped}`)
+        closeBulkAssignModal()
+        // Обновляем список задач при необходимости
+      } catch (error) {
+        console.error('Ошибка при массовом назначении:', error)
+        showToast('Не удалось выполнить массовое назначение', 'error')
+      } finally {
+        bulkAssignLoading.value = false
+      }
+    }
+
+    const closeBulkAssignModal = () => {
+      showBulkAssignModal.value = false
+      selectedTaskIds.value = []
+      selectedGroupIds.value = []
+    }
+
+    const clearOverdueTasks = async () => {
+      if (!confirm('Вы уверены, что хотите удалить все просроченные задачи? Это действие необратимо.')) {
+        return
+      }
+
+      clearingOverdue.value = true
+      try {
+        await api.deleteOverdueTasks()
+        showToast('Просроченные задачи успешно удалены')
+        await fetchTasks() // Обновляем список
+      } catch (error) {
+        console.error('Ошибка при удалении просроченных задач:', error)
+        showToast('Не удалось удалить просроченные задачи', 'error')
+      } finally {
+        clearingOverdue.value = false
+      }
+    }
     const showToast = (message, type = 'success') => {
       toast.value = {
         show: true,
@@ -357,18 +513,24 @@ export default {
     };
 
     const filteredTasks = computed(() => {
-      let result = [...tasks.value];
+      let tasksToProcess = [];
 
-      // Фильтрация по статусу
-      if (filterStatus.value !== 'all') {
-        result = result.filter(task => task.userStatus === filterStatus.value);
+      // Определяем источник задач
+      if (useClientPagination.value && hideExpiredTasks.value) {
+        tasksToProcess = [...allTasksRaw.value];
+      } else {
+        tasksToProcess = [...tasks.value];
       }
 
-      // Фильтрация по тегу
-      if (selectedTagFilter.value) {
-        result = result.filter(task => {
-          if (!task.tags || task.tags.length === 0) return false;
+      // Фильтр по статусу
+      if (filterStatus.value !== 'all') {
+        tasksToProcess = tasksToProcess.filter(task => task.userStatus === filterStatus.value);
+      }
 
+      // Фильтр по тегу
+      if (selectedTagFilter.value) {
+        tasksToProcess = tasksToProcess.filter(task => {
+          if (!task.tags || task.tags.length === 0) return false;
           return task.tags.some(tag => {
             const tagName = typeof tag === 'string' ? tag : tag.name;
             return tagName === selectedTagFilter.value;
@@ -376,13 +538,13 @@ export default {
         });
       }
 
-      // Новая фильтрация: скрытие прошедших задач
+      // Фильтр прошедших (уже применён через allTasksRaw, но для единообразия оставим)
       if (hideExpiredTasks.value) {
-        result = result.filter(task => !isTaskExpired(task));
+        tasksToProcess = tasksToProcess.filter(task => !isTaskExpired(task));
       }
 
       // Сортировка
-      result.sort((a, b) => {
+      tasksToProcess.sort((a, b) => {
         if (sortField.value === 'deadline') {
           return new Date(a.deadline) - new Date(b.deadline);
         } else {
@@ -391,13 +553,20 @@ export default {
         }
       });
 
-      return result;
+      // Клиентская пагинация
+      if (useClientPagination.value && hideExpiredTasks.value) {
+        const start = (tasksCurrentPage.value - 1) * tasksPageSize.value;
+        const end = start + tasksPageSize.value;
+        return tasksToProcess.slice(start, end);
+      }
+
+      return tasksToProcess;
     });
 
     // Новый метод для применения фильтра прошедших задач
     const applyExpiredFilter = () => {
-      // Фильтрация применяется автоматически через computed свойство
-      console.log('Скрытие прошедших задач:', hideExpiredTasks.value);
+      tasksCurrentPage.value = 1;
+      fetchTasks(); // перезагрузит все задачи, если фильтр включён
     };
     // Переменные для функционала "Поделиться"
     const groupMembers = ref([]);
@@ -407,20 +576,64 @@ export default {
     const sharingInProgress = ref(false);
     const taskToShare = ref(null);
 
+    const allTasksRaw = ref([]);        // все задачи (для режима с фильтром)
+    const useClientPagination = ref(false); // используем клиентскую пагинацию
+
     const fetchTasks = async () => {
       try {
+        let response
+
+        // Для преподавателя
         if (user.role === 'ROLE_TEACHER') {
-          const response = await api.getTasks();
-          tasks.value = response.data;
-        } else {
-          const response = await api.getMyTasks();
-          tasks.value = response.data;
+          if (hideExpiredTasks.value) {
+            // Чекбокс включен - показываем только активные задачи
+            response = await api.getActiveTasks(tasksCurrentPage.value - 1, tasksPageSize.value)
+          } else {
+            // Чекбокс выключен - показываем все задачи
+            response = await api.getTasks(tasksCurrentPage.value - 1, tasksPageSize.value)
+          }
+
+          const data = response.data
+          if (data && Array.isArray(data.content)) {
+            tasks.value = data.content
+            tasksTotalElements.value = data.totalElements ?? data.content.length
+            tasksTotalPages.value = data.totalPages ?? 1
+          } else if (Array.isArray(data)) {
+            tasks.value = data
+            tasksTotalElements.value = data.length
+            tasksTotalPages.value = 1
+          }
+          useClientPagination.value = false
+          return
+        }
+
+        // Для студента
+        if (user.role === 'ROLE_STUDENT') {
+          if (hideExpiredTasks.value) {
+            // Чекбокс включен - показываем только активные задачи
+            response = await api.getMyActiveTasks(
+                tasksCurrentPage.value - 1,
+                tasksPageSize.value
+            )
+          } else {
+            // Чекбокс выключен - показываем все задачи
+            response = await api.getMyTasks(
+                tasksCurrentPage.value - 1,
+                tasksPageSize.value
+            )
+          }
+
+          const data = response.data
+          tasks.value = data.content
+          tasksTotalElements.value = data.totalElements
+          tasksTotalPages.value = data.totalPages
+          useClientPagination.value = false
         }
       } catch (error) {
-        console.error('Ошибка при получении задач:', error);
-        showToast('Не удалось загрузить задачи', 'error');
+        console.error('Ошибка при получении задач:', error)
+        showToast('Не удалось загрузить задачи', 'error')
       }
-    };
+    }
 
     const fetchAvailableTags = async () => {
       try {
@@ -476,11 +689,30 @@ export default {
         groupMembersLoading.value = false;
       }
     };
-
-    onMounted(() => {
-      fetchTasks();
-      fetchAvailableTags(); // Загружаем теги при монтировании
+    const tasksTotalPages = computed(() => {
+      return tasksPageSize.value > 0
+          ? Math.ceil(tasksTotalElements.value / tasksPageSize.value)
+          : 0;
     });
+
+    const nextTasksPage = () => {
+      if (tasksCurrentPage.value < tasksTotalPages.value) {
+        tasksCurrentPage.value += 1;
+        fetchTasks();
+      }
+    };
+
+    const prevTasksPage = () => {
+      if (tasksCurrentPage.value > 1) {
+        tasksCurrentPage.value -= 1;
+        fetchTasks();
+      }
+    };
+
+    const changeTasksPageSize = () => {
+      tasksCurrentPage.value = 1;
+      fetchTasks();
+    };
 
 
     const filteredMembers = computed(() => {
@@ -568,7 +800,18 @@ export default {
       };
       return statusMap[status] || status;
     };
-
+    const changePriority = async (task) => {
+      const oldPriority = task.priority
+      try {
+        await api.updateTaskPriority(task.id, task.priority)
+        showToast(`Приоритет изменен на ${getPriorityText(task.priority)}`)
+      } catch (error) {
+        console.error('Ошибка при изменении приоритета:', error)
+        // Откатываем изменение
+        task.priority = oldPriority
+        showToast('Не удалось изменить приоритет', 'error')
+      }
+    }
     const getPriorityText = (priority) => {
       const priorityMap = {
         'LOW': 'Низкий',
@@ -585,13 +828,15 @@ export default {
     };
 
     const viewTask = (taskId) => {
-      router.push(`/profile/tasks/${taskId}`);
-    };
+      // Сохраняем всё состояние
+      localStorage.setItem('tasksCurrentPage', tasksCurrentPage.value);
+      localStorage.setItem('tasksHideExpired', hideExpiredTasks.value);
+      localStorage.setItem('tasksSortField', sortField.value);
+      localStorage.setItem('tasksSelectedTag', selectedTagFilter.value);
+      localStorage.setItem('tasksPageSize', tasksPageSize.value);
 
-    const openStatusModal = (task) => {
-      currentTask.value = task;
-      selectedStatus.value = task.userStatus;
-      showStatusModal.value = true;
+
+      router.push(`/profile/tasks/${taskId}`);
     };
 
     const openShareModal = async (task) => {
@@ -613,19 +858,6 @@ export default {
       const memberHasTask = usersWithSharedTask.value.some(user => user.id === member.id);
       if (!memberHasTask) {
         selectedMember.value = member.id;
-      }
-    };
-
-    const updateTaskStatus = async () => {
-      try {
-        await api.updateTaskStatus(currentTask.value.id, selectedStatus.value);
-
-        showStatusModal.value = false;
-        showToast('Статус задачи успешно обновлен');
-        await fetchTasks();
-      } catch (error) {
-        console.error('Ошибка при обновлении статуса:', error);
-        showToast('Не удалось обновить статус задачи', 'error');
       }
     };
 
@@ -735,22 +967,49 @@ export default {
       }
     };
 
+    const onHideExpiredChange = () => {
+      tasksCurrentPage.value = 1 // Сбрасываем на первую страницу
+      fetchTasks() // Перезагружаем задачи с новым фильтром
+    }
+
     const assignTask = (taskId) => {
       console.log('Назначить задачу', taskId);
     };
+    onMounted(async () => {
+      const savedPage = localStorage.getItem('tasksCurrentPage');
+      const savedHideExpired = localStorage.getItem('tasksHideExpired');
+      const savedSortField = localStorage.getItem('tasksSortField');
+      const savedSelectedTag = localStorage.getItem('tasksSelectedTag');
+      const savedPageSize = localStorage.getItem('tasksPageSize');
+
+      if (savedPage) tasksCurrentPage.value = parseInt(savedPage);
+      if (savedSortField) sortField.value = savedSortField;
+      if (savedSelectedTag) selectedTagFilter.value = savedSelectedTag;
+      if (savedPageSize) tasksPageSize.value = parseInt(savedPageSize);
+
+      await fetchTasks();
+      await fetchAvailableTags();
+    });
 
     return {
       tasks,
+      tasksCurrentPage,
+      tasksPageSize,
+      tasksTotalElements,
+      tasksTotalPages,
+      nextTasksPage,
+      prevTasksPage,
+      changeTasksPageSize,
       filteredTasks,
       filterStatus,
       sortField,
       showCreateModal,
-      showStatusModal,
       showShareModal,
       currentTask,
       selectedStatus,
       newTask,
       user,
+      fetchTasks,
       groupMembers,
       groupMembersLoading,
       memberSearch,
@@ -767,13 +1026,12 @@ export default {
       getTagClass,
       toggleTagSelection,
       addCustomTag,
+      changePriority,
       removeCustomTag,
       applyTagFilter,
       viewTask,
-      openStatusModal,
       openShareModal,
       selectMember,
-      updateTaskStatus,
       shareTask,
       createTask,
       assignTask,
@@ -784,9 +1042,22 @@ export default {
       usersWithTaskLoading,
       toast,
       hideToast,
+      clearOverdueTasks,
       applyExpiredFilter,
       hideExpiredTasks,
-      isTaskExpired
+      isTaskExpired,
+      executeBulkAssign,
+      closeBulkAssignModal,
+      fetchAvailableGroups,
+      fetchAvailableTasks,
+      openBulkAssignModal,
+      onHideExpiredChange,
+      showBulkAssignModal,
+      availableTasks,
+      selectedTaskIds,
+      availableGroups,
+      selectedGroupIds,
+      bulkAssignLoading,
     };
   }
 };
@@ -796,6 +1067,8 @@ export default {
 /* Базовые стили */
 .tasks-container {
   padding: 20px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 /* Стили для тостов */
@@ -886,20 +1159,20 @@ export default {
 
 .filter-select {
   padding: 10px 15px;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--border-color);
   border-radius: 8px;
-  background-color: white;
+  background-color: var(--bg-card);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s ease;
   min-width: 150px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-sm);
 }
 
 .filter-select:focus {
   outline: none;
-  border-color: #4CAF50;
-  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+  border-color: var(--color-success);
+  box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.15);
 }
 
 .filter-select:hover {
@@ -907,8 +1180,8 @@ export default {
 }
 
 .filter-select:not([value=""]) {
-  border-color: #4CAF50;
-  background-color: #f8fff9;
+  border-color: var(--color-success);
+  background-color: var(--bg-secondary);
 }
 
 /* Список задач */
@@ -919,10 +1192,10 @@ export default {
 }
 
 .task-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
   padding: 15px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Мета-информация задачи */
@@ -932,7 +1205,7 @@ export default {
   gap: 10px;
   margin-top: 10px;
   font-size: 0.9em;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 /* Статусы */
@@ -943,29 +1216,29 @@ export default {
 }
 
 .status-not_started {
-  background-color: #FFF3CD;
-  color: #856404;
+  background-color: var(--task-not-started);
+  color: var(--task-not-started-text);
 }
 
 .status-overdue {
-  background-color: #f8d7da;
-  color: #721c24;
+  background-color: var(--task-overdue);
+  color: var(--task-overdue-text);
 }
 
 .status-in_progress {
-  background-color: #D1ECF1;
-  color: #0C5460;
+  background-color: var(--task-in-progress);
+  color: var(--task-in-progress-text);
 }
 
 .status-completed {
-  background-color: #D4EDDA;
-  color: #155724;
+  background-color: var(--task-completed);
+  color: var(--task-completed-text);
 }
 
 .status-locked {
   font-size: 0.8em;
-  color: #6c757d;
-  background-color: #e9ecef;
+  color: var(--text-secondary);
+  background-color: var(--bg-tertiary);
   padding: 5px 10px;
   border-radius: 4px;
   margin-top: 5px;
@@ -1051,7 +1324,7 @@ export default {
 }
 
 .modal-content {
-  background: white;
+  background: var(--bg-card);
   padding: 30px;
   border-radius: 12px;
   width: 600px;
@@ -1082,8 +1355,10 @@ export default {
 .form-group select {
   width: 100%;
   padding: 8px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .current-status {
@@ -1223,15 +1498,14 @@ export default {
 
 /* Стили для выбора тегов при создании */
 .tags-selection {
-  border: 1px solid #ddd;
+  border: 1px solid #ffffff;
   border-radius: 4px;
   padding: 10px;
 }
-
 .available-tags-container {
-  border: 1px solid #e0e0e0;
+  border: 1px solid;
   border-radius: 8px;
-  background-color: #fafafa;
+  background-color: var(--bg-primary);
   margin-bottom: 15px;
 }
 
@@ -1240,11 +1514,11 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 10px 15px;
-  background-color: #f5f5f5;
-  border-bottom: 1px solid #e0e0e0;
+  background-color: var(--bg-primary);
+  border-bottom: 1px solid #000000;
   font-size: 0.9em;
   font-weight: 500;
-  color: #666;
+  color: var(--text-primary);
 }
 
 .tags-search {
@@ -1261,7 +1535,7 @@ export default {
 
 .tag-search-input:focus {
   outline: none;
-  border-color: #4CAF50;
+  border-color: #00ff0b;
 }
 
 .available-tags-scrollable {
@@ -1271,6 +1545,7 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  color: var(--text-primary);
 }
 
 /* Кастомный скроллбар */
@@ -1292,24 +1567,23 @@ export default {
   background: #a8a8a8;
 }
 
-/* Выбираемые теги */
 .tag-selectable {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 6px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid #464242;
   border-radius: 20px;
   font-size: 0.85em;
   cursor: pointer;
   transition: all 0.2s ease;
-  background-color: white;
+  background-color: #1f792e;
   user-select: none;
   flex-shrink: 0;
 }
 
 .tag-selectable:hover {
-  background-color: #f8f9fa;
+  background-color: #9dc05f;
   border-color: #bdbdbd;
   transform: translateY(-1px);
 }
@@ -1533,6 +1807,162 @@ export default {
   margin-left: 5px;
 }
 
+/* Пагинация */
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 20px 0;
+  padding: 15px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.pagination-btn {
+  padding: 8px 16px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background-color: #17A2B8;
+  color: white;
+  border-color: #17A2B8;
+}
+
+.pagination-btn:disabled {
+  background-color: #f8f9fa;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.page-size-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-text);
+  font-size: 0.9em;
+}
+/* Для кнопки очистки просрочки */
+.clear-overdue-btn {
+  background-color: #dc3545;
+  color: white;
+  padding: 8px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 10px;
+}
+
+.clear-overdue-btn:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
+.clear-overdue-btn:disabled {
+  background-color: #e9a2aa;
+  cursor: not-allowed;
+}
+
+/* Для селектора приоритета */
+.priority-selector {
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--input-bg);
+  cursor: pointer;
+}
+.header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.clear-overdue-btn {
+  background-color: #dc3545;
+  color: white;
+  padding: 8px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.clear-overdue-btn:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
+.clear-overdue-btn:disabled {
+  background-color: #e9a2aa;
+  cursor: not-allowed;
+}
+
+.priority-select {
+  margin: 0;
+}
+
+.priority-selector {
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.priority-selector:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.priority-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 15px;
+}
+
+.priority-edit label {
+  font-size: 0.9em;
+  color: var(--text-secondary);
+}
+/* Для массового назначения */
+.tasks-list-select,
+.groups-list-select {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.task-select-item,
+.group-select-item {
+  padding: 5px;
+  margin-bottom: 5px;
+}
+
+.task-select-item label,
+.group-select-item label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.bulk-assign {
+  background-color: #4caf50 !important;
+}
+
+.bulk-assign:hover {
+  background-color: #4caf50 !important;
+}
 /* Адаптивность для нового элемента */
 @media (max-width: 768px) {
   .hide-expired-checkbox {
@@ -1540,5 +1970,765 @@ export default {
     justify-content: flex-start;
     margin-top: 10px;
   }
+
+  .pagination {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
 }
+
+
+/* ============================================ */
+/* Стили для модального окна массового назначения */
+/* ============================================ */
+
+/* ============================================ */
+/* Стили для модального окна массового назначения */
+/* ============================================ */
+
+/* Модальное окно */
+.modal-content.large-modal {
+  width: 650px;
+  max-width: 90vw;
+  max-height: 85vh;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+/* Заголовок модалки */
+.modal-content.large-modal h3 {
+  margin: 0;
+  padding: 20px 24px;
+  background-color: #4caf50 !important;
+  color: white;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+/* Закрыть */
+.modal-content.large-modal .close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  font-size: 28px;
+  color: white;
+  opacity: 0.8;
+  z-index: 10;
+  cursor: pointer;
+}
+
+.modal-content.large-modal .close:hover {
+  opacity: 1;
+}
+
+/* Контент модалки (скроллится) */
+.modal-content.large-modal > :not(h3) {
+  padding: 0 24px;
+}
+
+/* Группы форм */
+.form-group {
+  margin-bottom: 24px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+/* Список задач и групп */
+.tasks-list-select,
+.groups-list-select {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  padding: 8px;
+}
+
+/* Стилизация скроллбара */
+.tasks-list-select::-webkit-scrollbar,
+.groups-list-select::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tasks-list-select::-webkit-scrollbar-track,
+.groups-list-select::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+.tasks-list-select::-webkit-scrollbar-thumb,
+.groups-list-select::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 3px;
+}
+
+.tasks-list-select::-webkit-scrollbar-thumb:hover,
+.groups-list-select::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Элемент задачи/группы */
+.task-select-item,
+.group-select-item {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color-light);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.task-select-item:hover,
+.group-select-item:hover {
+  background: var(--bg-hover);
+  border-color: #4caf50;
+  transform: translateX(2px);
+}
+
+.task-select-item:last-child,
+.group-select-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Чекбокс и метка */
+.task-select-item label,
+.group-select-item label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  margin: 0;
+  font-weight: normal;
+}
+
+.task-select-item input[type="checkbox"],
+.group-select-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #4caf50;
+  flex-shrink: 0;
+}
+
+/* Заголовок задачи */
+.task-title {
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+  font-size: 0.95rem;
+}
+
+/* Дедлайн задачи */
+.task-deadline {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+/* Название группы */
+.group-select-item label span:first-of-type {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* Пустой список */
+.empty-list {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-style: italic;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+}
+
+/* Секция с количеством выбранных */
+.selection-summary {
+  margin: 20px 0;
+  padding: 16px;
+  background: rgba(76, 175, 80, 0.1);
+  border-left: 4px solid #4caf50;
+  border-radius: 10px;
+}
+
+.selection-summary p {
+  margin: 6px 0;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.selection-summary p:first-child {
+  margin-top: 0;
+}
+
+.selection-summary p:last-child {
+  margin-bottom: 0;
+}
+
+.selection-summary strong {
+  color: #4caf50;
+  font-size: 1.05rem;
+}
+
+/* Кнопки действий - ВЕРТИКАЛЬНОЕ РАСПОЛОЖЕНИЕ */
+.form-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 24px;
+  margin-top: 10px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+}
+
+.form-actions button {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+/* Кнопка Отмена */
+.cancel-btn {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  order: 2; /* Отмена будет второй (снизу) */
+}
+
+.cancel-btn:hover {
+  background: var(--border-color);
+  transform: translateY(-1px);
+}
+
+/* Кнопка Назначить */
+.submit-btn {
+  background-color: #4caf50 !important;
+  color: white;
+  order: 1; /* Назначить будет первым (сверху) */
+}
+
+.submit-btn:hover:not(:disabled) {
+  background-color: #45a049 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+.submit-btn:disabled {
+  background-color: #cccccc !important;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Кнопка массового назначения на основной странице */
+.bulk-assign {
+  background-color: #4caf50 !important;
+  padding: 10px 20px !important;
+  color: white !important;
+}
+
+.bulk-assign:hover {
+  background-color: #45a049 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+  color: white !important;
+}
+
+/* Анимация для модалки */
+.modal {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal-content.large-modal {
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Эффект при выборе чекбокса */
+.task-select-item:has(input:checked),
+.group-select-item:has(input:checked) {
+  background: rgba(76, 175, 80, 0.1);
+  border-color: #4caf50;
+}
+
+/* Адаптивность для мобильных устройств */
+@media (max-width: 768px) {
+  .modal-content.large-modal {
+    width: 95%;
+    max-height: 90vh;
+  }
+
+  .modal-content.large-modal h3 {
+    padding: 16px 20px;
+    font-size: 1.1rem;
+  }
+
+  .task-select-item label,
+  .group-select-item label {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .task-deadline {
+    margin-left: 30px;
+  }
+
+  .form-actions {
+    padding: 16px 20px;
+  }
+
+  .form-actions button {
+    padding: 10px 20px;
+    font-size: 0.95rem;
+  }
+
+  .selection-summary {
+    padding: 12px;
+  }
+
+  .selection-summary p {
+    font-size: 0.85rem;
+  }
+
+  .tasks-list-select,
+  .groups-list-select {
+    max-height: 200px;
+  }
+}
+  /* ============================================ */
+  /* Стили для выбора приоритета */
+  /* ============================================ */
+
+  /* Контейнер для выбора приоритета */
+  .priority-select {
+    margin: 0;
+    display: inline-block;
+  }
+
+  /* Селектор приоритета */
+  .priority-selector {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--input-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    outline: none;
+  }
+
+  .priority-selector:hover {
+    border-color: #4caf50;
+    background: var(--bg-hover);
+  }
+
+  .priority-selector:focus {
+    border-color: #4caf50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+  }
+
+  .priority-selector:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* Стили для опций приоритета */
+  .priority-selector option[value="HIGH"] {
+    color: #dc3545;
+    font-weight: bold;
+  }
+
+  .priority-selector option[value="MEDIUM"] {
+    color: #ffc107;
+  }
+
+  .priority-selector option[value="LOW"] {
+    color: #28a745;
+  }
+
+  /* Альтернативный вариант - кнопки для выбора приоритета */
+  .priority-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .priority-btn {
+    padding: 4px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+    font-size: 0.8em;
+    transition: all 0.2s ease;
+  }
+
+  .priority-btn.high {
+    color: #dc3545;
+  }
+
+  .priority-btn.high.active {
+    background: #dc3545;
+    color: white;
+    border-color: #dc3545;
+  }
+
+  .priority-btn.medium {
+    color: #ffc107;
+  }
+
+  .priority-btn.medium.active {
+    background: #ffc107;
+    color: #856404;
+    border-color: #ffc107;
+  }
+
+  .priority-btn.low {
+    color: #28a745;
+  }
+
+  .priority-btn.low.active {
+    background: #28a745;
+    color: white;
+    border-color: #28a745;
+  }
+
+  .priority-btn:hover:not(.active) {
+    background: var(--bg-hover);
+    transform: translateY(-1px);
+  }
+
+  /* Отображение приоритета в карточке задачи */
+  .task-meta .priority {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.75em;
+    font-weight: 600;
+  }
+
+  /* Цвета для приоритета в мета-информации */
+  .task-meta .priority[class*="HIGH"],
+  .priority-high {
+    background: rgba(220, 53, 69, 0.15);
+    color: #dc3545;
+  }
+
+  .task-meta .priority[class*="MEDIUM"],
+  .priority-medium {
+    background: rgba(255, 193, 7, 0.15);
+    color: #856404;
+  }
+
+  .task-meta .priority[class*="LOW"],
+  .priority-low {
+    background: rgba(40, 167, 69, 0.15);
+    color: #28a745;
+  }
+
+  /* Бейдж приоритета в карточке */
+  .priority-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7em;
+    font-weight: 600;
+  }
+
+
+  /* Анимация при изменении приоритета */
+  @keyframes priorityChange {
+    0% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.05);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .priority-selector:active {
+    animation: priorityChange 0.2s ease;
+  }
+/* Улучшенные стили для карточки задачи */
+.task-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid var(--border-color-light);
+}
+
+.task-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Заголовок задачи */
+.task-card h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+/* Описание задачи */
+.task-card p {
+  margin: 0 0 12px 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+
+
+/* Кнопка просмотра */
+.action-btn.view {
+  background-color: #4caf50;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+
+.action-btn.view:hover {
+  background-color: #45a049;
+  transform: translateY(-1px);
+}
+
+/* Кнопка поделиться */
+.action-btn.share {
+  background-color: #9c27b0;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+
+.action-btn.share:hover:not(:disabled) {
+  background-color: #7b1fa2;
+  transform: translateY(-1px);
+}
+
+.action-btn.share:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
+/* Карточка задачи */
+.task-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid var(--border-color-light);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+/* Заголовок */
+.task-card h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+/* Описание - растягивается */
+.task-card p {
+  margin: 0 0 12px 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex-grow: 1;
+}
+
+/* Теги */
+.task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 10px 0;
+  flex-shrink: 0;
+}
+
+/* Мета информация */
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* Кнопки - всегда внизу */
+.task-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color-light);
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+/* Кнопки сжимаются */
+.task-actions .action-btn {
+  padding: 6px 8px;
+  font-size: 0.75em;
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* Текст внутри кнопок не переносится */
+.action-btn span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.priority-select {
+  margin: 0;
+  display: inline-block;
+}
+
+.priority-selector {
+  padding: 10px 15px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-card);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-width: 120px;
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+}
+
+.priority-selector {
+  outline: none;
+  border-color: var(--color-success);
+  box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.15);
+}
+
+.priority-selector:hover {
+  border-color: #bdbdbd;
+}
+
+.priority-selector {
+  padding: 5px 6px;
+  font-size: 0.75em;
+  flex-shrink: 1;
+  min-width: 70px;
+  max-width: 100px;
+}
+/* Цвета для опций приоритета */
+.priority-selector option[value="HIGH"] {
+  color: #dc3545;
+  font-weight: 500;
+}
+
+.priority-selector option[value="MEDIUM"] {
+  color: #ffc107;
+  font-weight: 500;
+}
+
+.priority-selector option[value="LOW"] {
+  color: #28a745;
+  font-weight: 500;
+}
+
+/* Отображение текущего выбранного значения с цветом */
+.priority-selector.priority-high {
+  color: #dc3545;
+  font-weight: 500;
+}
+
+.priority-selector.priority-medium {
+  color: #ffc107;
+  font-weight: 500;
+}
+
+.priority-selector.priority-low {
+  color: #28a745;
+  font-weight: 500;
+}
+
+/* Адаптивность для мобильных устройств */
+@media (max-width: 768px) {
+  .priority-selector {
+    min-width: auto;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .task-actions {
+    flex-wrap: wrap;
+  }
+
+  .priority-select {
+    width: 100%;
+  }
+}
+
 </style>

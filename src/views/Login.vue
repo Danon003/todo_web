@@ -350,7 +350,7 @@ export default {
   align-items: center;
   min-height: 100vh;
   width: 100vw;
-  background-color: #f5f5f7;
+  background: var(--bg-secondary);
   margin: 0;
   padding: 0;
 }
@@ -359,8 +359,8 @@ export default {
   width: 100%;
   max-width: 100%;
   padding: 2rem;
-  background: white;
-  box-shadow: none;
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -370,6 +370,7 @@ h2 {
   text-align: center;
   margin-bottom: 2.5rem;
   font-size: clamp(1.5rem, 4vw, 2.5rem);
+  color: var(--text-primary);
 }
 
 .form-header {
@@ -387,7 +388,7 @@ h2 {
 .back-btn {
   background: none;
   border: none;
-  color: #4CAF50;
+  color: var(--color-success);
   cursor: pointer;
   font-size: 16px;
   padding: 5px 10px;
@@ -396,7 +397,7 @@ h2 {
 }
 
 .back-btn:hover {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary);
 }
 
 .form-group {
@@ -407,37 +408,40 @@ label {
   display: block;
   margin-bottom: 0.8rem;
   font-size: clamp(1rem, 2vw, 1.2rem);
+  color: var(--text-secondary);
 }
 
 .form-input {
   width: 100%;
   padding: 1rem;
   font-size: clamp(1rem, 2vw, 1.2rem);
-  border: 1px solid #ddd;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  color: var(--input-text);
   border-radius: 0.5rem;
   box-sizing: border-box;
   transition: border-color 0.3s;
 }
 
 .form-input:focus {
-  border-color: #4CAF50;
+  border-color: var(--color-success);
   outline: none;
 }
 
 .form-input:disabled {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary);
   cursor: not-allowed;
 }
 
 .password-hint {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--text-muted);
   margin-top: 0.5rem;
 }
 
 .error-text {
   font-size: 0.85rem;
-  color: #e74c3c;
+  color: var(--color-danger);
   margin-top: 0.5rem;
 }
 
@@ -446,7 +450,7 @@ label {
   padding: 1.2rem;
   font-size: clamp(1rem, 2vw, 1.2rem);
   margin-top: 1rem;
-  background-color: #4CAF50;
+  background: var(--color-success);
   color: white;
   border: none;
   border-radius: 0.5rem;
@@ -455,18 +459,18 @@ label {
 }
 
 .submit-btn:hover:not(:disabled) {
-  background-color: rgba(79, 119, 79, 0.78);
+  opacity: 0.9;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(167, 238, 153, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
 .submit-btn:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(170, 250, 170, 0.3);
+  box-shadow: var(--shadow-sm);
 }
 
 .submit-btn:disabled {
-  background-color: #cccccc;
+  background: var(--color-secondary);
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
@@ -479,12 +483,12 @@ label {
 .auth-link {
   text-align: center;
   margin: 0.5rem 0;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 15px;
 }
 
 .auth-link a {
-  color: #00bc85;
+  color: var(--color-success);
   text-decoration: none;
   font-weight: 500;
 }
@@ -494,16 +498,16 @@ label {
 }
 
 .forgot-password-link {
-  color: #4CAF50 !important;
+  color: var(--color-success) !important;
 }
 
 .success-message {
   font-size: clamp(0.9rem, 2vw, 1.1rem);
   margin-top: 1.5rem;
   padding: 1rem;
-  background-color: #e8f5e8;
-  color: #2e7d32;
-  border: 1px solid #c8e6c9;
+  background: rgba(46, 125, 50, 0.1);
+  color: var(--color-success);
+  border: 1px solid rgba(46, 125, 50, 0.2);
   border-radius: 0.5rem;
   text-align: center;
 }
@@ -512,9 +516,9 @@ label {
   font-size: clamp(0.9rem, 2vw, 1.1rem);
   margin-top: 1.5rem;
   padding: 1rem;
-  background-color: #ffebee;
-  color: #c62828;
-  border: 1px solid #ffcdd2;
+  background: rgba(198, 40, 40, 0.1);
+  color: var(--color-danger);
+  border: 1px solid rgba(198, 40, 40, 0.2);
   border-radius: 0.5rem;
   text-align: center;
 }
@@ -524,7 +528,7 @@ label {
   .login-form {
     max-width: 450px;
     border-radius: 1rem;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-lg);
     height: auto;
     padding: 3rem;
   }

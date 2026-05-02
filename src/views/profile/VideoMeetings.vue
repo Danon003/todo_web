@@ -11,21 +11,15 @@
       </button>
     </div>
 
-    <div
-        class="filters"
-        v-if="!loading && meetings.length > 0"
-    >
+    <div class="filters" v-if="!loading && meetings.length > 0">
       <label class="filter-checkbox">
         <input type="checkbox" v-model="hidePastMeetings">
-        <span>Скрывать прошедшие встречи</span>
+        <span>Скрывать завершенные встречи</span> <!-- Изменили текст -->
       </label>
-      <span v-if="user.role === 'ROLE_ADMIN'" class="admin-hint">
-        Админ может удалять прошедшие встречи
-      </span>
+
     </div>
 
     <div v-if="loading" class="loading">Загрузка...</div>
-
 
     <div v-else-if="meetings.length === 0" class="empty-state">
       <p>Нет доступных видеовстреч</p>
@@ -44,16 +38,18 @@
           v-for="meeting in visibleMeetings"
           :key="meeting.id"
           class="meeting-card"
-          :class="{
-            'meeting-active': isMeetingActive(meeting),
-            'meeting-past': hasMeetingEnded(meeting)
-          }"
+          :class="getMeetingCardClass(meeting)"
       >
         <div class="meeting-header">
           <h3>{{ meeting.title }}</h3>
-          <div class="meeting-actions" v-if="canEditMeeting(meeting) || canDeleteMeeting(meeting)">
+          <div class="meeting-badges">
+            <span v-if="isMeetingCompleted(meeting)" class="badge completed">Завершена</span>
+            <span v-else-if="isMeetingActive(meeting)" class="badge active">Активна</span>
+            <span v-else class="badge upcoming">Предстоящая</span>
+          </div>
+          <div class="meeting-actions" v-if="user.role === 'ROLE_TEACHER' || user.role === 'ROLE_ADMIN'">
             <button
-                v-if="canEditMeeting(meeting)"
+                v-if="(meeting.createdById === user.id || user.role === 'ROLE_ADMIN') && !isMeetingCompleted(meeting)"
                 @click="openEditModal(meeting)"
                 class="action-btn edit"
                 title="Редактировать"
@@ -61,7 +57,7 @@
               ✏️
             </button>
             <button
-                v-if="canDeleteMeeting(meeting)"
+                v-if="meeting.createdById === user.id || user.role === 'ROLE_ADMIN'"
                 @click="confirmDelete(meeting)"
                 class="action-btn delete"
                 title="Удалить"
@@ -85,14 +81,34 @@
         </div>
 
         <div class="meeting-footer">
+          <!-- Кнопка присоединения -->
           <button
               @click="joinMeeting(meeting.id)"
               class="join-btn"
-              :disabled="!isMeetingActive(meeting)"
-              :title="getJoinTooltip(meeting)"
+              :class="{ 'disabled': !canJoinMeeting(meeting) }"
+              :disabled="!canJoinMeeting(meeting)"
+              :title="getJoinButtonTitle(meeting)"
           >
-            {{ isMeetingActive(meeting) ? '🎥 Присоединиться' : hasMeetingEnded(meeting) ? '✔ Встреча завершена' : '⏰ Не началась' }}
+            {{ getJoinButtonText(meeting) }}
           </button>
+
+          <!-- Кнопка завершения для преподавателей -->
+          <button
+              v-if="(user.role === 'ROLE_TEACHER' || user.role === 'ROLE_ADMIN') &&
+                     (meeting.createdById === user.id || user.role === 'ROLE_ADMIN') &&
+                     !isMeetingCompleted(meeting) && isMeetingActive(meeting)"
+              @click="confirmComplete(meeting)"
+              class="complete-btn"
+              title="Завершить встречу"
+          >
+            ✅ Завершить
+          </button>
+
+          <!-- Сообщение о завершенной встрече -->
+          <div v-if="isMeetingCompleted(meeting)" class="meeting-completed-message">
+            <p v-if="!meeting.isActive">Встреча завершена преподавателем</p>
+            <p v-else>Встреча завершена по времени</p>
+          </div>
         </div>
       </div>
     </div>
@@ -154,6 +170,17 @@
                 {{ group.name }}
               </option>
             </select>
+            <!-- Отладка - временно -->
+            <div v-if="availableGroups.length === 0" class="debug-groups">
+              <p class="form-hint debug">Группы не загружены. Проверьте консоль браузера (F12)</p>
+            </div>
+            <div v-else class="debug-groups" style="display: none;">
+              <p class="form-hint">Загружено групп: {{ availableGroups.length }}</p>
+            </div>
+            <p class="form-hint" v-if="user.role === 'ROLE_TEACHER'">
+              Если выбрать группу, встречу увидят только её студенты
+            </p>
+
             <p class="form-hint" v-if="user.role === 'ROLE_TEACHER'">
               Если выбрать группу, встречу увидят только её студенты
             </p>
@@ -182,6 +209,17 @@
         </div>
       </div>
     </div>
+    <div v-if="showCompleteConfirm" class="modal" @click.self="cancelComplete">
+      <div class="modal-content">
+        <h3>Завершение встречи</h3>
+        <p>Вы уверены, что хотите завершить встречу "{{ meetingToComplete?.title }}"?</p>
+        <p class="warning-text">⚠️ Участники больше не смогут присоединиться к этой встрече</p>
+        <div class="form-actions">
+          <button @click="cancelComplete" class="cancel-btn">Отмена</button>
+          <button @click="completeMeeting" class="complete-confirm-btn">Завершить встречу</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -196,13 +234,13 @@ export default {
     const loading = ref(true)
     const showModal = ref(false)
     const showDeleteConfirm = ref(false)
-    const showEmbed = ref(false)
+    const showCompleteConfirm = ref(false)
     const editingMeeting = ref(null)
     const meetingToDelete = ref(null)
-    const currentMeeting = ref(null)
+    const meetingToComplete = ref(null)
     const saving = ref(false)
+    const completing = ref(false)
     const availableGroups = ref([])
-    const embedUrl = ref('')
     const hidePastMeetings = ref(true)
 
     const user = JSON.parse(localStorage.getItem('user') || '{}')
@@ -216,6 +254,7 @@ export default {
       groupId: null
     })
 
+    // Функции для работы с датами
     const toInputValue = (value) => {
       if (!value) return ''
       return value.slice(0, 16)
@@ -233,6 +272,82 @@ export default {
       })
     }
 
+    // Основные функции для статусов встреч
+    const isMeetingPast = (meeting) => {
+      if (!meeting.isActive) return true // Если завершена вручную - считаем прошедшей
+      if (!meeting.startTime) return false
+      const now = new Date()
+      if (meeting.endTime) {
+        return now > new Date(meeting.endTime)
+      }
+      return now > new Date(meeting.startTime)
+    }
+
+    const isMeetingActive = (meeting) => {
+      if (!meeting.isActive) return false
+      if (!meeting.startTime) return false
+      const now = new Date()
+      const startTime = new Date(meeting.startTime)
+      return now >= startTime
+    }
+
+    const isMeetingCompleted = (meeting) => {
+      return !meeting.isActive || isMeetingPast(meeting)
+    }
+
+    const canJoinMeeting = (meeting) => {
+      return meeting.isActive && isMeetingActive(meeting) && !isMeetingPast(meeting)
+    }
+
+    // Классы и тексты для встреч
+    const getMeetingCardClass = (meeting) => {
+      if (isMeetingCompleted(meeting)) return 'meeting-completed'
+      if (isMeetingActive(meeting)) return 'meeting-active'
+      return 'meeting-upcoming'
+    }
+
+    const getStatusText = (meeting) => {
+      if (!meeting.isActive) return 'Завершена'
+      if (isMeetingPast(meeting)) return 'Завершена'
+      if (isMeetingActive(meeting)) return 'Активна'
+      return 'Предстоящая'
+    }
+
+    const getStatusClass = (meeting) => {
+      if (isMeetingCompleted(meeting)) return 'status-completed'
+      if (isMeetingActive(meeting)) return 'status-active'
+      return 'status-pending'
+    }
+
+    const getJoinButtonText = (meeting) => {
+      if (isMeetingCompleted(meeting)) return '❌ Завершена'
+      if (!isMeetingActive(meeting)) return '⏰ Не началась'
+      return '🎥 Присоединиться'
+    }
+
+    const getJoinButtonTitle = (meeting) => {
+      if (!meeting.isActive) return 'Встреча завершена преподавателем'
+      if (isMeetingPast(meeting)) return 'Встреча завершена по времени'
+      if (!isMeetingActive(meeting)) return 'Встреча еще не началась'
+      return 'Присоединиться к встрече'
+    }
+
+    // Фильтрация встреч
+    const visibleMeetings = computed(() => {
+      const sorted = [...meetings.value].sort((a, b) => {
+        return new Date(a.startTime) - new Date(b.startTime)
+      })
+
+      return sorted.filter(meeting => {
+        // Если включен фильтр скрытия прошедших - скрываем ВСЕ завершенные встречи
+        if (hidePastMeetings.value && isMeetingCompleted(meeting)) {
+          return false
+        }
+        return true
+      })
+    })
+
+    // API функции
     const fetchMeetings = async () => {
       try {
         loading.value = true
@@ -247,21 +362,47 @@ export default {
     }
 
     const fetchGroups = async () => {
-      if (user.role !== 'ROLE_TEACHER') {
-        return
-      }
+      // Загружаем группы для всех, кто может создавать встречи
+      if (user.role !== 'ROLE_TEACHER' && user.role !== 'ROLE_ADMIN') return;
 
       try {
-        const response = await api.getGroups()
-        availableGroups.value = response.data || []
-      } catch (error) {
-        console.error('Ошибка при загрузке групп:', error)
-      }
-    }
+        console.log('Загружаем группы...');
+        const response = await api.getGroups();
+        console.log('Ответ от сервера (группы):', response);
 
-    const onIframeLoad = () => {
-      console.log('✅ Iframe видеовстречи загружен')
-    }
+        // Проверяем структуру ответа
+        let groups = [];
+        if (response.data && Array.isArray(response.data)) {
+          groups = response.data;
+        } else if (response.data && response.data.content && Array.isArray(response.data.content)) {
+          // Пагинированный ответ
+          groups = response.data.content;
+        } else if (Array.isArray(response)) {
+          groups = response;
+        }
+
+        console.log('Обработанные группы:', groups);
+        availableGroups.value = groups || [];
+
+        if (groups.length === 0) {
+          console.log('Нет доступных групп');
+        }
+      } catch (error) {
+        console.error('Детальная ошибка при загрузке групп:', error);
+        console.error('Статус:', error.response?.status);
+        console.error('Данные ошибки:', error.response?.data);
+        console.error('Заголовки:', error.response?.headers);
+
+        // Показываем пользователю понятную ошибку
+        if (error.response?.status === 403) {
+          alert('У вас нет прав для просмотра списка групп');
+        } else if (error.response?.status === 401) {
+          alert('Сессия истекла. Пожалуйста, войдите снова');
+        } else {
+          alert('Не удалось загрузить список групп. Проверьте консоль для деталей');
+        }
+      }
+    };
 
     const joinMeeting = async (meetingId) => {
       try {
@@ -271,6 +412,63 @@ export default {
       } catch (error) {
         console.error('Ошибка при получении ссылки для подключения:', error)
         alert('Не удалось получить ссылку для подключения')
+      }
+    }
+
+    const completeMeeting = async () => {
+      if (!meetingToComplete.value) return
+
+      completing.value = true
+      try {
+        await api.completeVideoMeeting(meetingToComplete.value.id)
+        // Обновляем локальные данные вместо полной перезагрузки
+        const meetingIndex = meetings.value.findIndex(m => m.id === meetingToComplete.value.id)
+        if (meetingIndex !== -1) {
+          meetings.value[meetingIndex].isActive = false
+        }
+        cancelComplete()
+      } catch (error) {
+        console.error('Ошибка при завершении встречи:', error)
+        alert(error.response?.data?.message || 'Не удалось завершить встречу')
+      } finally {
+        completing.value = false
+      }
+    }
+
+    // Остальные функции (create, edit, delete) остаются без изменений
+    const openCreateModal = () => {
+      editingMeeting.value = null
+      meetingForm.value = {
+        title: '',
+        description: '',
+        startTime: '',
+        endTime: '',
+        groupId: null
+      }
+      showModal.value = true
+    }
+
+    const openEditModal = (meeting) => {
+      editingMeeting.value = meeting
+      meetingForm.value = {
+        title: meeting.title,
+        description: meeting.description || '',
+        startTime: toInputValue(meeting.startTime),
+        endTime: meeting.endTime ? toInputValue(meeting.endTime) : '',
+        groupId: meeting.groupId || null
+      }
+      showModal.value = true
+    }
+
+    const closeModal = () => {
+      showModal.value = false
+      editingMeeting.value = null
+      meetingForm.value = {
+        title: '',
+        description: '',
+        startTime: '',
+        endTime: '',
+        groupId: null
       }
     }
 
@@ -313,44 +511,6 @@ export default {
       }
     }
 
-    const openEditModal = (meeting) => {
-      editingMeeting.value = meeting
-
-      meetingForm.value = {
-        title: meeting.title,
-        description: meeting.description || '',
-        startTime: toInputValue(meeting.startTime),
-        endTime: meeting.endTime ? toInputValue(meeting.endTime) : '',
-        groupId: meeting.groupId || null
-      }
-
-      showModal.value = true
-    }
-
-    const openCreateModal = () => {
-      editingMeeting.value = null
-      meetingForm.value = {
-        title: '',
-        description: '',
-        startTime: '',
-        endTime: '',
-        groupId: null
-      }
-      showModal.value = true
-    }
-
-    const closeModal = () => {
-      showModal.value = false
-      editingMeeting.value = null
-      meetingForm.value = {
-        title: '',
-        description: '',
-        startTime: '',
-        endTime: '',
-        groupId: null
-      }
-    }
-
     const confirmDelete = (meeting) => {
       meetingToDelete.value = meeting
       showDeleteConfirm.value = true
@@ -372,72 +532,16 @@ export default {
       }
     }
 
-    const hasMeetingEnded = (meeting) => {
-      if (!meeting.startTime) return false
-      const now = new Date()
-      if (meeting.endTime) {
-        return now > new Date(meeting.endTime)
-      }
-      return now > new Date(meeting.startTime)
+    const confirmComplete = (meeting) => {
+      meetingToComplete.value = meeting
+      showCompleteConfirm.value = true
     }
 
-    const hasMeetingStarted = (meeting) => {
-      if (!meeting.startTime) return false
-      return new Date() >= new Date(meeting.startTime)
+    const cancelComplete = () => {
+      showCompleteConfirm.value = false
+      meetingToComplete.value = null
+      completing.value = false
     }
-
-    const isMeetingActive = (meeting) => {
-      return hasMeetingStarted(meeting) && !hasMeetingEnded(meeting)
-    }
-
-    const getStatusText = (meeting) => {
-      if (hasMeetingEnded(meeting)) return 'Завершена'
-      if (!hasMeetingStarted(meeting)) return 'Не началась'
-      return 'Активна'
-    }
-
-    const getStatusClass = (meeting) => {
-      if (hasMeetingEnded(meeting)) return 'status-ended'
-      if (!hasMeetingStarted(meeting)) return 'status-pending'
-      return 'status-active'
-    }
-
-    const isCurrentUserCreator = (meeting) => {
-      if (!currentUserId) return false
-      return meeting.createdById === currentUserId
-    }
-
-    const canEditMeeting = (meeting) => {
-      if (user.role !== 'ROLE_TEACHER') return false
-      if (!isCurrentUserCreator(meeting)) return false
-      return !hasMeetingEnded(meeting)
-    }
-
-    const canDeleteMeeting = (meeting) => {
-      if (user.role === 'ROLE_ADMIN') return true
-      if (user.role !== 'ROLE_TEACHER') return false
-      if (!isCurrentUserCreator(meeting)) return false
-      return !hasMeetingEnded(meeting)
-    }
-
-    const getJoinTooltip = (meeting) => {
-      if (hasMeetingEnded(meeting)) return 'Встреча завершена'
-      if (!hasMeetingStarted(meeting)) return 'Встреча ещё не началась'
-      return 'Присоединиться к встрече'
-    }
-
-    const visibleMeetings = computed(() => {
-      const sorted = [...meetings.value].sort((a, b) => {
-        return new Date(a.startTime) - new Date(b.startTime)
-      })
-
-      return sorted.filter(meeting => {
-        if (hidePastMeetings.value && hasMeetingEnded(meeting)) {
-          return false
-        }
-        return true
-      })
-    })
 
     onMounted(() => {
       fetchMeetings()
@@ -447,19 +551,19 @@ export default {
     return {
       user,
       meetings,
-      visibleMeetings,
-      hidePastMeetings,
       loading,
       showModal,
       showDeleteConfirm,
-      showEmbed,
+      showCompleteConfirm,
       editingMeeting,
       meetingToDelete,
-      currentMeeting,
+      meetingToComplete,
       saving,
+      completing,
       availableGroups,
       meetingForm,
-      embedUrl,
+      hidePastMeetings,
+      visibleMeetings,
       openCreateModal,
       openEditModal,
       closeModal,
@@ -467,20 +571,25 @@ export default {
       confirmDelete,
       cancelDelete,
       deleteMeeting,
+      confirmComplete,
+      cancelComplete,
+      completeMeeting,
       joinMeeting,
-      onIframeLoad,
       formatDateTime,
       isMeetingActive,
-      hasMeetingEnded,
+      isMeetingPast,
+      isMeetingCompleted,
+      canJoinMeeting,
+      getMeetingCardClass,
       getStatusText,
       getStatusClass,
-      canEditMeeting,
-      canDeleteMeeting,
-      getJoinTooltip
+      getJoinButtonText,
+      getJoinButtonTitle
     }
   }
 }
 </script>
+
 
 <style scoped>
 .video-meetings {
@@ -488,6 +597,8 @@ export default {
   max-width: 1200px;
   margin: 0 auto;
   position: relative;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .header {
@@ -499,7 +610,9 @@ export default {
 
 .header h1 {
   margin: 0;
-  color: #333;
+  color: var(--text-primary);
+  font-size: 2em;
+  font-weight: 600;
 }
 
 .filters {
@@ -508,6 +621,10 @@ export default {
   gap: 20px;
   margin-bottom: 20px;
   flex-wrap: wrap;
+  padding: 15px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
 }
 
 .filter-checkbox {
@@ -515,7 +632,8 @@ export default {
   align-items: center;
   gap: 8px;
   font-size: 0.95em;
-  color: #333;
+  color: var(--text-primary);
+  cursor: pointer;
 }
 
 .filter-checkbox input {
@@ -527,179 +645,165 @@ export default {
 .admin-hint {
   font-size: 0.85em;
   color: #6c757d;
+  font-style: italic;
 }
 
 .create-btn {
   background: #17A2B8;
   color: white;
   border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
+  padding: 12px 24px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 1em;
-  transition: background 0.3s;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(23, 162, 184, 0.3);
 }
 
 .create-btn:hover {
   background: #138ca1;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(23, 162, 184, 0.4);
 }
 
 .loading {
   text-align: center;
-  padding: 40px;
-  color: #666;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+  font-size: 1.1em;
 }
 
 .empty-state {
   text-align: center;
-  padding: 60px 20px;
-  color: #999;
+  padding: 80px 20px;
+  color: var(--text-secondary);
+}
+
+.empty-state p:first-child {
+  font-size: 1.2em;
+  margin-bottom: 10px;
+  color: var(--text-primary);
 }
 
 .empty-hint {
   margin-top: 10px;
   font-size: 0.9em;
-  color: #666;
-}
-
-/* Embed стили */
-.embed-container {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 95vw;
-  height: 85vh;
-  background: white;
-  border: 2px solid #007bff;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-}
-
-.embed-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px 20px;
-  background: #007bff;
-  color: white;
-  border-radius: 10px 10px 0 0;
-}
-
-.embed-header h3 {
-  margin: 0;
-  font-size: 1.3em;
-}
-
-.embed-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.btn-outline {
-  background: transparent;
-  border: 1px solid white;
-  color: white;
-  padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9em;
-  transition: all 0.3s;
-}
-
-.btn-outline:hover {
-  background: white;
-  color: #007bff;
-}
-
-.btn-close {
-  background: transparent;
-  border: none;
-  color: white;
-  font-size: 1.5em;
-  cursor: pointer;
-  padding: 5px;
-  border-radius: 4px;
-  transition: background 0.3s;
-}
-
-.btn-close:hover {
-  background: rgba(255,255,255,0.2);
-}
-
-.embed-content {
-  flex: 1;
-  border-radius: 0 0 10px 10px;
-  overflow: hidden;
-  background: #f8f9fa;
-}
-
-.jitsi-iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
-}
-
-.embed-loading {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  color: #666;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
 /* Стили для списка встреч */
 .meetings-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 24px;
 }
 
 .meeting-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  padding: 24px;
+  box-shadow: var(--shadow-md);
   transition: all 0.3s ease;
-  border-left: 4px solid #e9ecef;
+  border-left: 6px solid var(--border-color);
+  position: relative;
+  overflow: hidden;
 }
 
-.meeting-past {
-  border-left-color: #adb5bd;
-  opacity: 0.8;
-}
-
-.meeting-card:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
-  transform: translateY(-2px);
-}
-
+/* Активная встреча */
 .meeting-active {
   border-left-color: #28a745;
+  box-shadow: 0 6px 20px rgba(40, 167, 69, 0.15);
+}
+
+.meeting-active:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(40, 167, 69, 0.2);
+}
+
+/* Завершенная вручную встреча */
+.meeting-completed {
+  border-left-color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  opacity: 0.85;
+}
+
+.meeting-completed:hover {
+  transform: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.meeting-completed .meeting-header h3 {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.meeting-completed .description {
+  color: var(--text-muted);
+}
+
+.meeting-completed .details {
+  color: var(--text-muted);
+}
+
+/* Прошедшая по времени встреча */
+.meeting-past {
+  border-left-color: #8c8883;
+  opacity: 0.9;
+}
+
+.meeting-past:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 193, 7, 0.15);
 }
 
 .meeting-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 15px;
+  margin-bottom: 16px;
+  gap: 12px;
 }
 
 .meeting-header h3 {
   margin: 0;
-  color: #333;
+  color: var(--text-primary);
   flex: 1;
-  font-size: 1.2em;
+  font-size: 1.3em;
   line-height: 1.3;
+  font-weight: 600;
+}
+
+.meeting-badge {
+  display: flex;
+  gap: 8px;
+}
+
+.badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge.completed {
+  background: #9ba1a4;
+  color: white;
+}
+
+.badge.past {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
 }
 
 .meeting-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .action-btn {
@@ -707,41 +811,63 @@ export default {
   border: none;
   font-size: 1.2em;
   cursor: pointer;
-  padding: 5px;
-  border-radius: 4px;
-  transition: all 0.2s;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  opacity: 0.7;
 }
 
-.action-btn:hover {
+.action-btn:hover:not(:disabled) {
+  opacity: 1;
   transform: scale(1.1);
-  background: rgba(0,0,0,0.05);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.action-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.action-btn.edit:hover:not(:disabled) {
+  background: rgba(23, 162, 184, 0.1);
+}
+
+.action-btn.delete:hover:not(:disabled) {
+  background: rgba(220, 53, 69, 0.1);
 }
 
 .meeting-info {
-  margin-bottom: 15px;
+  margin-bottom: 20px;
 }
 
 .description {
-  color: #666;
-  margin-bottom: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
   line-height: 1.5;
   font-size: 0.95em;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  border-left: 3px solid var(--border-color);
 }
 
 .details {
   font-size: 0.9em;
-  color: #555;
+  color: var(--text-secondary);
 }
 
 .details p {
-  margin: 6px 0;
+  margin: 8px 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .details strong {
-  min-width: 80px;
-  margin-right: 8px;
+  min-width: 100px;
+  margin-right: 12px;
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 /* Статусы встреч */
@@ -751,57 +877,100 @@ export default {
 }
 
 .status-pending {
-  color: #ffc107;
+  color: #ff9c07;
   font-weight: 600;
 }
 
 .status-ended {
-  color: #dc3545;
+  color: #fd1414;
+  font-weight: 600;
+}
+
+.status-completed {
+  color: #6c757d;
   font-weight: 600;
 }
 
 .meeting-footer {
-  border-top: 1px solid #eee;
-  padding-top: 15px;
+  border-top: 1px solid #e9ecef;
+  padding-top: 20px;
   display: flex;
-  gap: 10px;
-}
-
-.join-btn, .embed-btn {
-  flex: 1;
-  padding: 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.95em;
-  border: none;
-  transition: all 0.3s;
-  text-align: center;
+  gap: 12px;
+  align-items: center;
 }
 
 .join-btn {
+  flex: 1;
+  padding: 12px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1em;
+  font-weight: 500;
+  border: none;
+  transition: all 0.3s ease;
+  text-align: center;
   background: #28a745;
   color: white;
+  box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
 }
 
 .join-btn:hover:not(:disabled) {
   background: #218838;
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
 }
 
 .join-btn:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  opacity: 0.6;
+}
+
+/* Кнопка завершения */
+.complete-btn {
+  background: #ffc107;
+  color: #212529;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95em;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  flex: 1;
+  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
+}
+
+.complete-btn:hover {
+  background: #e0a800;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
+}
+
+.complete-btn:disabled {
   background: #ccc;
   cursor: not-allowed;
   transform: none;
+  box-shadow: none;
 }
 
-.embed-btn {
-  background: #17A2B8;
-  color: white;
+/* Сообщение о завершенной встрече */
+.meeting-completed-message {
+  text-align: center;
+  padding: 12px;
+  background: #e9ecef;
+  border-radius: 8px;
+  margin-top: 12px;
+  width: 100%;
 }
 
-.embed-btn:hover {
-  background: #138ca1;
-  transform: translateY(-1px);
+.meeting-completed-message p {
+  margin: 0;
+  color: #6c757d;
+  font-size: 0.9em;
+  font-weight: 500;
 }
 
 /* Модальные окна */
@@ -819,40 +988,51 @@ export default {
 }
 
 .modal-content {
-  background: white;
+  background: var(--bg-card);
   padding: 30px;
-  border-radius: 12px;
+  border-radius: 16px;
   width: 600px;
   max-width: 90%;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
   position: relative;
+  border: 1px solid var(--border-color);
 }
 
 .modal-content h3 {
-  margin: 0 0 20px 0;
-  color: #333;
+  margin: 0 0 24px 0;
+  color: var(--text-primary);
   font-size: 1.5em;
   font-weight: 600;
   text-align: center;
-  padding-bottom: 15px;
-  border-bottom: 2px solid #e9ecef;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--border-color);
 }
 
 .close {
   position: absolute;
-  top: 15px;
-  right: 20px;
+  top: 20px;
+  right: 24px;
   font-size: 28px;
   cursor: pointer;
   color: #888;
   transition: color 0.2s;
   line-height: 1;
+  background: none;
+  border: none;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
 }
 
 .close:hover {
-  color: #333;
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .form-group {
@@ -862,133 +1042,357 @@ export default {
 .form-group label {
   display: block;
   margin-bottom: 8px;
-  color: #495057;
+  color: var(--text-primary);
   font-weight: 500;
+  font-size: 0.95em;
 }
 
 .form-group input,
 .form-group textarea,
 .form-group select {
   width: 100%;
-  padding: 12px 15px;
-  border: 2px solid #e0e0e0;
+  padding: 12px 16px;
+  border: 2px solid var(--border-color);
   border-radius: 8px;
   font-size: 1em;
-  transition: border-color 0.3s;
+  transition: all 0.3s;
   box-sizing: border-box;
   font-family: inherit;
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .form-group input:focus,
 .form-group textarea:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #17A2B8;
-  box-shadow: 0 0 0 3px rgba(23, 162, 184, 0.1);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.1);
 }
 
 .form-group input:disabled,
 .form-group textarea:disabled,
 .form-group select:disabled {
-  background-color: #f5f5f5;
+  background-color: var(--input-disabled);
   cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .form-hint {
   font-size: 0.85em;
-  color: #666;
-  margin-top: 5px;
+  color: var(--text-secondary);
+  margin-top: 6px;
   margin-bottom: 0;
+  font-style: italic;
 }
 
 .form-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   justify-content: flex-end;
-  margin-top: 25px;
+  margin-top: 28px;
 }
 
 .cancel-btn {
   background-color: #6c757d;
   color: white;
-  padding: 10px 20px;
+  padding: 12px 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   font-weight: 500;
-  transition: background-color 0.2s;
+  transition: all 0.3s;
+  font-size: 0.95em;
 }
 
 .cancel-btn:hover:not(:disabled) {
   background-color: #5a6268;
+  transform: translateY(-1px);
 }
 
 .save-btn {
   background-color: #17A2B8;
   color: white;
-  padding: 10px 20px;
+  padding: 12px 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   font-weight: 500;
-  transition: background-color 0.2s;
+  transition: all 0.3s;
+  font-size: 0.95em;
 }
 
 .save-btn:hover:not(:disabled) {
   background-color: #138ca1;
+  transform: translateY(-1px);
 }
 
 .delete-btn {
   background-color: #dc3545;
   color: white;
-  padding: 10px 20px;
+  padding: 12px 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   font-weight: 500;
-  transition: background-color 0.2s;
+  transition: all 0.3s;
+  font-size: 0.95em;
 }
 
 .delete-btn:hover {
   background-color: #c82333;
+  transform: translateY(-1px);
+}
+
+.complete-confirm-btn {
+  background: #ffc107;
+  color: #212529;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  font-size: 0.95em;
+}
+
+.complete-confirm-btn:hover:not(:disabled) {
+  background: #e00000;
+  transform: translateY(-1px);
 }
 
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  transform: none !important;
 }
 
+.warning-text {
+  color: #856404;
+  background: #fff3cd;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #ffeaa7;
+  margin: 16px 0;
+  font-size: 0.9em;
+}
+
+.meeting-upcoming {
+  border-left-color: #17A2B8;
+}
+
+.meeting-upcoming:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(23, 162, 184, 0.15);
+}
+
+/* Обновляем баджи */
+.meeting-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.7em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge.active {
+  background: #28a745;
+  color: white;
+}
+
+.badge.upcoming {
+  background: #17A2B8;
+  color: white;
+}
+
+.badge.past {
+  background: #6c757d;
+  color: white;
+}
+
+.badge.completed {
+  background: #343a40;
+  color: white;
+}
+
+/* Для прошедших встреч делаем кнопки серыми */
+.meeting-past .join-btn {
+  background: #6c757d !important;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.meeting-past .join-btn:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.meeting-completed {
+  border-left-color: #6c757d;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  opacity: 0.8;
+}
+
+.meeting-completed:hover {
+  transform: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.meeting-completed .meeting-header h3 {
+  color: #6c757d;
+  text-decoration: line-through;
+}
+
+.meeting-completed .description {
+  color: #868e96;
+}
+
+.meeting-completed .details {
+  color: #868e96;
+}
+
+.meeting-completed .join-btn {
+  background: #6c757d !important;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.meeting-completed .join-btn:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.meeting-completed .action-btn.edit {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.meeting-completed .action-btn.edit:hover {
+  transform: none;
+  background: none;
+}
+
+/* Бейджи */
+.badge.completed {
+  background: #343a40;
+  color: white;
+}
+
+.badge.active {
+  background: #28a745;
+  color: white;
+}
+
+.badge.upcoming {
+  background: #17A2B8;
+  color: white;
+}
+
+/* Статусы */
+.status-completed {
+  color: #6c757d;
+  font-weight: 600;
+}
+
+.status-active {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.status-pending {
+  color: #ffc107;
+  font-weight: 600;
+}
 /* Адаптивность */
 @media (max-width: 768px) {
   .video-meetings {
-    padding: 15px;
+    padding: 16px;
   }
 
   .header {
     flex-direction: column;
-    gap: 15px;
+    gap: 16px;
     align-items: stretch;
+    margin-bottom: 24px;
+  }
+
+  .header h1 {
+    font-size: 1.7em;
+    text-align: center;
   }
 
   .meetings-list {
     grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .meeting-card {
+    padding: 20px;
+  }
+
+  .meeting-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .meeting-header h3 {
+    text-align: center;
+  }
+
+  .meeting-actions {
+    justify-content: center;
   }
 
   .meeting-footer {
     flex-direction: column;
   }
 
-  .embed-container {
-    width: 98vw;
-    height: 80vh;
+  .filters {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
   }
 
-  .embed-header {
-    padding: 10px 15px;
+  .form-actions {
+    flex-direction: column;
   }
 
-  .embed-header h3 {
-    font-size: 1.1em;
+  .modal-content {
+    padding: 24px;
+    margin: 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .video-meetings {
+    padding: 12px;
+  }
+
+  .meeting-card {
+    padding: 16px;
+  }
+
+  .meeting-header h3 {
+    font-size: 1.2em;
+  }
+
+  .details p {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .details strong {
+    min-width: auto;
+    margin-right: 0;
   }
 }
 </style>

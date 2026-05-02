@@ -6,12 +6,12 @@
         <button
             @click="markAllAsRead"
             class="btn-mark-all"
-            :disabled="notifications.length === 0 || unreadCount === 0 || !userInfo"
+            :disabled="notificationsPage.content.length === 0 || unreadCount === 0 || !userInfo"
         >
           Отметить все как прочитанные
         </button>
         <button
-            @click="fetchNotifications"
+            @click="refreshNotifications"
             class="btn-refresh"
             :disabled="loading"
         >
@@ -33,8 +33,9 @@
     </div>
 
     <div v-else>
-      <div class="connection-status" >
+      <div class="connection-status">
         <span v-if="unreadCount > 0">• Непрочитанных: {{ unreadCount }}</span>
+        <span v-else>• Все уведомления прочитаны</span>
       </div>
 
       <div class="notification-filters">
@@ -81,7 +82,10 @@
             <span v-else-if="notification.type === 'CHANGE_ROLE'">⚙️</span>
             <span v-else-if="notification.type === 'SYSTEM'">⚙️</span>
             <span v-else-if="notification.type === 'VIDEO_MEETING_CREATED'">📹</span>
-
+            <span v-else-if="notification.type === 'VIDEO_MEETING_REMINDER'">📹</span>
+            <span v-else-if="notification.type === 'SOLUTION_UPLOADED'">📎</span>
+            <span v-else-if="notification.type === 'New_Comment'">💬</span>
+            <span v-else-if="notification.type === 'SOLUTION_GRADED'">⭐</span>
             <span v-else>🔔</span>
           </div>
 
@@ -115,14 +119,30 @@
         </div>
       </div>
 
+      <!-- Пагинация -->
       <div v-if="filteredNotifications.length > 0 && !filters.unreadOnly" class="notification-pagination">
-        <button
-            @click="loadMore"
-            class="pagination-btn"
-            :disabled="loadingMore || !hasMoreNotifications"
-        >
-          {{ loadingMore ? 'Загрузка...' : 'Загрузить еще' }}
-        </button>
+        <div class="pagination-info">
+          Страница {{ notificationsPage.number + 1 }} из {{ notificationsPage.totalPages }}
+          (всего: {{ notificationsPage.totalElements }} уведомлений)
+        </div>
+
+        <div class="pagination-buttons">
+          <button
+              @click="prevPage"
+              :disabled="notificationsPage.first || loading"
+              class="pagination-btn"
+          >
+            ← Назад
+          </button>
+
+          <button
+              @click="nextPage"
+              :disabled="notificationsPage.last || loading"
+              class="pagination-btn"
+          >
+            Вперед →
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -140,17 +160,29 @@ export default {
   setup() {
     const toast = useToast()
     const router = useRouter()
-    const notifications = ref([])
+
+    // Используем Page объект вместо простого массива
+    const notificationsPage = ref({
+      content: [],
+      totalElements: 0,
+      totalPages: 0,
+      number: 0,
+      size: 15,
+      first: true,
+      last: true
+    })
+
     const loading = ref(false)
     const authLoading = ref(true)
-    const loadingMore = ref(false)
-    const hasMoreNotifications = ref(true)
-    const currentLimit = ref(50)
     const userInfo = ref(null)
 
+    // Пагинационные параметры
+    const currentPage = ref(0)
+    const pageSize = ref(15)
+    const sort = ref('createdAt,desc')
+
     const filters = ref({
-      unreadOnly: false,
-      type: 'all'
+      unreadOnly: false
     })
 
     // Получаем метод обновления счетчика из родительского компонента
@@ -162,34 +194,18 @@ export default {
       }
     }
 
-    // Обновляем методы для вызова updateParentCounter
-    const markAsRead = async (notification) => {
-      if (!userInfo.value) return
-
-      try {
-        if (!notification.read) {
-          await api.markAsReadNotification(notification.id)
-          notification.read = true
-          updateParentCounter() // Обновляем счетчик
-        }
-      } catch (error) {
-        console.error('Ошибка при отметке уведомления как прочитанного:', error)
-        notification.read = true
-        updateParentCounter() // Обновляем счетчик
-        toast.warning('Уведомление отмечено как прочитанное (локально)')
-      }
-    }
-
     const unreadCount = computed(() => {
-      return notifications.value.filter(n => !n.read).length
+      return notificationsPage.value.content.filter(n => !n.read).length
     })
 
+    // Фильтрованные уведомления
     const filteredNotifications = computed(() => {
-      return notifications.value.filter(notification => {
-        const matchesUnread = !filters.value.unreadOnly || !notification.read
-        const matchesType = filters.value.type === 'all' || notification.type === filters.value.type
-        return matchesUnread && matchesType
-      })
+      if (filters.value.unreadOnly) {
+        // Если фильтр "только непрочитанные" - фильтруем локально
+        return notificationsPage.value.content.filter(notification => !notification.read)
+      }
+      // Иначе показываем все уведомления текущей страницы
+      return notificationsPage.value.content
     })
 
     // Получение информации о пользователе
@@ -198,7 +214,6 @@ export default {
         authLoading.value = true
         const response = await api.getUserInfo()
         userInfo.value = response.data
-        console.log('User info loaded:', userInfo.value)
 
         // После получения userInfo загружаем уведомления и настраиваем WebSocket
         await fetchNotifications()
@@ -218,7 +233,6 @@ export default {
         return
       }
 
-
       notificationWebSocket.connect(userInfo.value.id,
           (newNotification) => {
             handleNewNotification(newNotification)
@@ -227,41 +241,40 @@ export default {
     }
 
     const handleNewNotification = (newNotification) => {
-      // ❗ Пропускаем уведомления без ID
       if (!newNotification.id) {
-        console.warn('Пропущено уведомление без ID:', newNotification);
-        return;
+        console.warn('Пропущено уведомление без ID:', newNotification)
+        return
       }
 
-      // ❗ Устанавливаем read по умолчанию
+      // Устанавливаем read по умолчанию
       if (newNotification.read === undefined) {
-        newNotification.read = false;
+        newNotification.read = false
       }
 
-      // ❗ Исправляем createdAt, если это массив или число
+      // Исправляем createdAt
       if (Array.isArray(newNotification.createdAt)) {
-        // Если массив — формируем строку вручную
-        const [year, month, day, hour, minute, second, nano] = newNotification.createdAt;
-        newNotification.createdAt = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}.${String(nano).slice(0, 3)}Z`;
+        const [year, month, day, hour, minute, second, nano] = newNotification.createdAt
+        newNotification.createdAt = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}.${String(nano).slice(0, 3)}Z`
       } else if (typeof newNotification.createdAt === 'number') {
-        newNotification.createdAt = new Date(newNotification.createdAt * 1000).toISOString();
+        newNotification.createdAt = new Date(newNotification.createdAt * 1000).toISOString()
       }
 
-      const existingIndex = notifications.value.findIndex(n => n.id === newNotification.id);
+      // Добавляем новое уведомление в начало списка
+      notificationsPage.value.content.unshift(newNotification)
 
-      if (existingIndex === -1) {
-        notifications.value.unshift(newNotification);
+      // Обновляем общее количество
+      notificationsPage.value.totalElements += 1
 
-        if (!document.hidden) {
-          toast.info(`Новое уведомление: ${newNotification.title}`, {
-            timeout: 4000,
-            onClick: () => {
-              markAsRead(newNotification)
-            }
-          })
-        }
-      } else {
-        notifications.value[existingIndex] = newNotification;
+      // Обновляем количество страниц
+      notificationsPage.value.totalPages = Math.ceil(notificationsPage.value.totalElements / pageSize.value)
+
+      if (!document.hidden) {
+        toast.info(`Новое уведомление: ${newNotification.title}`, {
+          timeout: 4000,
+          onClick: () => {
+            markAsRead(newNotification)
+          }
+        })
       }
 
       updateParentCounter()
@@ -272,44 +285,90 @@ export default {
 
       try {
         loading.value = true
-        const response = await api.getNotification({
-          limit: currentLimit.value,
-          userId: userInfo.value.id
-        })
-        notifications.value = response.data || []
-        hasMoreNotifications.value = (response.data || []).length === currentLimit.value
+
+        const params = {
+          userId: userInfo.value.id,
+          page: currentPage.value,
+          size: pageSize.value,
+          sort: sort.value
+        }
+
+        let response
+        if (filters.value.unreadOnly) {
+          response = await api.getUnreadNotifications(params)
+        } else {
+          response = await api.getNotification(params)
+        }
+
+        // Предполагаем, что API возвращает Page объект
+        if (response.data && response.data.content) {
+          notificationsPage.value = response.data
+        } else {
+          // Если API возвращает просто массив, создаем Page вручную
+          notificationsPage.value = {
+            content: response.data || [],
+            totalElements: response.data?.length || 0,
+            totalPages: Math.ceil((response.data?.length || 0) / pageSize.value),
+            number: currentPage.value,
+            size: pageSize.value,
+            first: currentPage.value === 0,
+            last: currentPage.value >= Math.ceil((response.data?.length || 0) / pageSize.value) - 1
+          }
+        }
+
       } catch (error) {
         console.error('Ошибка при загрузке уведомлений:', error)
         toast.error('Ошибка загрузки уведомлений')
-        notifications.value = getDemoNotifications()
       } finally {
         loading.value = false
       }
     }
 
-    const loadMore = async () => {
+    // Обновить уведомления (сброс на первую страницу)
+    const refreshNotifications = () => {
+      currentPage.value = 0
+      fetchNotifications()
+    }
+
+    // Навигация по страницам
+    const nextPage = () => {
+      if (!notificationsPage.value.last) {
+        currentPage.value++
+        fetchNotifications()
+      }
+    }
+
+    const prevPage = () => {
+      if (!notificationsPage.value.first) {
+        currentPage.value--
+        fetchNotifications()
+      }
+    }
+
+    const applyFilters = () => {
+      currentPage.value = 0
+      fetchNotifications()
+    }
+
+    const applySorting = () => {
+      currentPage.value = 0
+      fetchNotifications()
+    }
+
+    const markAsRead = async (notification) => {
       if (!userInfo.value) return
 
       try {
-        loadingMore.value = true
-        const newLimit = currentLimit.value + 30
-        const response = await api.getNotification({
-          limit: newLimit,
-          userId: userInfo.value.id
-        })
-
-        if (response.data && response.data.length > notifications.value.length) {
-          notifications.value = response.data
-          currentLimit.value = newLimit
-          hasMoreNotifications.value = response.data.length === newLimit
-        } else {
-          hasMoreNotifications.value = false
+        if (!notification.read) {
+          await api.markAsReadNotification(notification.id)
+          notification.read = true
+          updateParentCounter()
         }
       } catch (error) {
-        console.error('Ошибка при загрузке дополнительных уведомлений:', error)
-        toast.error('Ошибка загрузки уведомлений')
-      } finally {
-        loadingMore.value = false
+        console.error('Ошибка при отметке уведомления как прочитанного:', error)
+        notification.read = true
+        updateParentCounter()
+        toast.warning('Уведомление отмечено как прочитанное (локально)')
       }
     }
 
@@ -318,17 +377,18 @@ export default {
 
       try {
         await api.markAllAsReadNotification(userInfo.value.id)
-        notifications.value.forEach(notification => {
+        // Помечаем все уведомления как прочитанные локально
+        notificationsPage.value.content.forEach(notification => {
           notification.read = true
         })
-        updateParentCounter() // Обновляем счетчик
+        updateParentCounter()
         toast.success('Все уведомления отмечены как прочитанные')
       } catch (error) {
         console.error('Ошибка при отметке всех уведомлений:', error)
-        notifications.value.forEach(notification => {
+        notificationsPage.value.content.forEach(notification => {
           notification.read = true
         })
-        updateParentCounter() // Обновляем счетчик
+        updateParentCounter()
         toast.success('Все уведомления отмечены как прочитанные (локально)')
       }
     }
@@ -336,36 +396,39 @@ export default {
     const deleteNotification = async (id) => {
       try {
         await api.deleteNotification(id)
-        notifications.value = notifications.value.filter(n => n.id !== id)
+        // Удаляем уведомление из списка
+        notificationsPage.value.content = notificationsPage.value.content.filter(n => n.id !== id)
+        notificationsPage.value.totalElements = Math.max(0, notificationsPage.value.totalElements - 1)
+        notificationsPage.value.totalPages = Math.ceil(notificationsPage.value.totalElements / pageSize.value)
         toast.success('Уведомление удалено')
       } catch (error) {
         console.error('Ошибка при удалении уведомления:', error)
-        notifications.value = notifications.value.filter(n => n.id !== id)
+        notificationsPage.value.content = notificationsPage.value.content.filter(n => n.id !== id)
+        notificationsPage.value.totalElements = Math.max(0, notificationsPage.value.totalElements - 1)
+        notificationsPage.value.totalPages = Math.ceil(notificationsPage.value.totalElements / pageSize.value)
         toast.success('Уведомление удалено (локально)')
       }
     }
 
-
     const formatTime = (dateString) => {
-      if (!dateString) return 'недавно';
+      if (!dateString) return 'недавно'
 
-      // Обрезаем наносекунды до миллисекунд
       const trimmed = typeof dateString === 'string'
           ? dateString.replace(/(\.\d{3})\d+/, '$1')
-          : dateString;
+          : dateString
 
-      const date = new Date(trimmed);
+      const date = new Date(trimmed)
       if (isNaN(date.getTime())) {
-        console.warn('Невалидная дата:', dateString);
-        return 'недавно';
+        console.warn('Невалидная дата:', dateString)
+        return 'недавно'
       }
 
-      const now = new Date();
-      const diff = now - date;
+      const now = new Date()
+      const diff = now - date
 
-      if (diff < 60000) return 'только что';
-      if (diff < 3600000) return `${Math.floor(diff / 60000)} мин назад`;
-      if (diff < 86400000) return `${Math.floor(diff / 3600000)} ч назад`;
+      if (diff < 60000) return 'только что'
+      if (diff < 3600000) return `${Math.floor(diff / 60000)} мин назад`
+      if (diff < 86400000) return `${Math.floor(diff / 3600000)} ч назад`
 
       return date.toLocaleDateString('ru-RU', {
         day: '2-digit',
@@ -373,7 +436,7 @@ export default {
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
-      });
+      })
     }
 
     const isRealTime = (dateString) => {
@@ -397,12 +460,13 @@ export default {
         'CHANGE_ROLE': 'Новая роль',
         'TEACHER_REMOVED': 'Наставничество',
         'TEACHER_ASSIGN': 'Наставничество',
-        'VIDEO_MEETING_CREATED': 'Видеоконференция'
+        'VIDEO_MEETING_CREATED': 'Видеоконференция',
+        'VIDEO_MEETING_REMINDER': 'Видеоконференция',
+        'SOLUTION_UPLOADED': 'Новое решение',
+        'New_Comment': 'Новый комментарий',
+        'SOLUTION_GRADED': 'Оценка решения',
       }
       return typeMap[type] || type
-    }
-    const applyFilters = () => {
-      // Фильтрация происходит автоматически через computed
     }
 
     onMounted(() => {
@@ -414,25 +478,26 @@ export default {
     })
 
     return {
-      notifications,
+      notificationsPage,
       loading,
       authLoading,
-      loadingMore,
       filters,
       filteredNotifications,
       unreadCount,
-      hasMoreNotifications,
       userInfo,
+      sort,
       fetchUserInfo,
-      fetchNotifications,
-      loadMore,
+      refreshNotifications,
+      nextPage,
+      prevPage,
       markAsRead,
       markAllAsRead,
       deleteNotification,
       formatTime,
       isRealTime,
       getTypeText,
-      applyFilters
+      applyFilters,
+      applySorting
     }
   }
 }
@@ -444,6 +509,8 @@ export default {
   max-width: 800px;
   margin: 0 auto;
   padding: 20px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .notification-header {
@@ -456,7 +523,7 @@ export default {
 }
 
 .notification-header h2 {
-  color: #2c3e50;
+  color: var(--text-primary);
   margin: 0;
   font-size: 28px;
   font-weight: 600;
@@ -557,7 +624,7 @@ export default {
   gap: 20px;
   margin-bottom: 24px;
   padding: 16px;
-  background: #f8f9fa;
+  background: var(--bg-secondary);
   border-radius: 8px;
   align-items: center;
 }
@@ -573,20 +640,20 @@ export default {
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  color: #495057;
+  color: var(--text-secondary);
 }
 
 .filter-select {
   padding: 8px 12px;
-  border: 1px solid #ced4da;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
-  background: white;
+  background: var(--bg-card);
 }
 
 .loading {
   text-align: center;
   padding: 60px 20px;
-  color: #6c757d;
+  color: var(--text-secondary);
 }
 
 .spinner {
@@ -631,9 +698,9 @@ export default {
   align-items: flex-start;
   gap: 16px;
   padding: 20px;
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition: all 0.2s ease;
   border-left: 4px solid transparent;
@@ -645,8 +712,8 @@ export default {
 }
 
 .notification-item.unread {
-  border-left-color: #4a90e2;
-  background: #f8fbff;
+  border-left-color: var(--color-primary);
+  background: var(--bg-secondary);
 }
 
 .notification-icon {
@@ -662,14 +729,14 @@ export default {
 
 .notification-content h4 {
   margin: 0 0 8px 0;
-  color: #2c3e50;
+  color: var(--text-primary);
   font-weight: 600;
   word-wrap: break-word;
 }
 
 .notification-content p {
   margin: 0 0 12px 0;
-  color: #495057;
+  color: var(--text-secondary);
   line-height: 1.5;
   word-wrap: break-word;
 }
@@ -678,7 +745,7 @@ export default {
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: #6c757d;
+  color: var(--text-muted);
   flex-wrap: wrap;
   align-items: center;
 }

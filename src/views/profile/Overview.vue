@@ -52,12 +52,6 @@
         </div>
 
         <div class="stat-card">
-          <h3>🐢 Стагнация</h3>
-          <p class="stat-value">{{ stats.stuckTasks || 0 }}</p>
-          <span>задач не менялись >2 недель</span>
-        </div>
-
-        <div class="stat-card">
           <h3>👨‍🏫 Мои задания</h3>
           <p class="stat-value">{{ stats.myCreatedTasks || 0 }}</p>
           <div class="sub-metric">
@@ -76,7 +70,7 @@
             <span class="report-description">Создайте детальный отчет в формате Excel</span>
           </div>
           <button @click="openReportModal" class="generate-report-btn">
-            🚀 Сгенерировать отчет
+            Сгенерировать отчет
           </button>
         </div>
       </div>
@@ -314,12 +308,42 @@ export default {
 
     const fetchGroups = async () => {
       try {
-        const response = await api.getGroups()
-        availableGroups.value = response.data
+        console.log('Загружаем группы для отчета...');
+        const response = await api.getGroups();
+        console.log('Ответ от сервера (группы):', response);
+
+        // Проверяем структуру ответа
+        let groups = [];
+        if (response.data && Array.isArray(response.data)) {
+          groups = response.data;
+        } else if (response.data && response.data.content && Array.isArray(response.data.content)) {
+          // Пагинированный ответ
+          groups = response.data.content;
+        } else if (Array.isArray(response)) {
+          groups = response;
+        }
+
+        console.log('Обработанные группы:', groups);
+        availableGroups.value = groups || [];
+
+        if (groups.length === 0) {
+          console.log('Нет доступных групп');
+        }
       } catch (error) {
-        console.error('Ошибка загрузки групп:', error)
+        console.error('Детальная ошибка при загрузке групп:', error);
+        console.error('Статус:', error.response?.status);
+        console.error('Данные ошибки:', error.response?.data);
+
+        // Показываем пользователю понятную ошибку
+        if (error.response?.status === 403) {
+          alert('У вас нет прав для просмотра списка групп');
+        } else if (error.response?.status === 401) {
+          alert('Сессия истекла. Пожалуйста, войдите снова');
+        } else {
+          alert('Не удалось загрузить список групп. Проверьте консоль для деталей');
+        }
       }
-    }
+    };
 
     const openReportModal = async () => {
       showReportModal.value = true
@@ -426,10 +450,11 @@ export default {
   padding: 20px;
   max-width: 1200px;
   margin: 0 auto;
+  color: var(--text-primary);
 }
 
 .welcome-title {
-  color: #000;
+  color: var(--text-primary);
   font-size: 28px;
   margin-bottom: 30px;
   text-align: center;
@@ -443,18 +468,19 @@ export default {
 }
 
 .stat-card {
-  background: white;
+  background: var(--bg-secondary);
   border-radius: 12px;
   padding: 24px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-md);
   text-align: center;
-  color: #000;
-  border-left: 4px solid #4a90e2;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--color-primary);
 }
 
 .stat-card h3 {
   margin: 0 0 15px 0;
-  color: #000;
+  color: var(--text-primary);
   font-weight: 600;
   font-size: 18px;
 }
@@ -463,13 +489,13 @@ export default {
   font-size: 32px;
   font-weight: bold;
   margin: 10px 0;
-  color: #000;
+  color: var(--color-primary);
 }
 
 .stat-details {
   margin-top: 15px;
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .stat-details span {
@@ -481,7 +507,7 @@ export default {
 .progress-bar {
   width: 100%;
   height: 8px;
-  background: #f0f0f0;
+  background: var(--bg-tertiary);
   border-radius: 4px;
   margin: 15px 0;
   overflow: hidden;
@@ -489,34 +515,34 @@ export default {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #4a90e2, #357abd);
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-dark));
   border-radius: 4px;
   transition: width 0.3s ease;
 }
 
 /* Deadline warning */
 .deadline-warning {
-  border-left-color: #dc3545;
-  background: linear-gradient(135deg, #fff, #fff3cd);
+  border-left-color: var(--color-danger);
+  background: linear-gradient(135deg, var(--bg-card), var(--task-not-started));
 }
 
 .deadline-text {
-  color: #dc3545;
+  color: var(--task-overdue-text);
   font-weight: bold;
 }
 
 /* Task status chart */
 .task-status-chart {
   margin-top: 40px;
-  background: white;
+  background: var(--bg-card);
   border-radius: 12px;
   padding: 24px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px var(--shadow-sm);
 }
 
 .task-status-chart h3 {
   margin: 0 0 20px 0;
-  color: #000;
+  color: var(--text-primary);
   text-align: center;
 }
 
@@ -536,23 +562,23 @@ export default {
 }
 
 .status-bar.not-started {
-  background: #fff3cd;
-  color: #856404;
+  background: var(--task-not-started);
+  color: var(--task-not-started-text);
 }
 
 .status-bar.in-progress {
-  background: #d1ecf1;
-  color: #0c5460;
+  background: var(--task-in-progress);
+  color: var(--task-in-progress-text);
 }
 
 .status-bar.completed {
-  background: #d4edda;
-  color: #155724;
+  background: var(--task-completed);
+  color: var(--task-completed-text);
 }
 
 .status-bar.overdue {
-  background: #f5a2a2;
-  color: #8d0a0a;
+  background: var(--task-overdue);
+  color: var(--task-overdue-text);
 }
 
 .status-label {
@@ -567,7 +593,7 @@ export default {
 .loading {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: var(--text-muted);
 }
 .teacher-dashboard {
   padding: 20px;
@@ -581,11 +607,11 @@ export default {
 }
 
 .stat-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  border-left: 4px solid #42a5f5;
+  box-shadow: 0 2px 8px var(--shadow-sm);
+  border-left: 4px solid var(--color-info);
 }
 
 .stat-card.warning {
@@ -595,29 +621,29 @@ export default {
 .stat-card h3 {
   margin: 0 0 15px 0;
   font-size: 1.1em;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .stat-value {
   font-size: 2.5em;
   font-weight: bold;
   margin: 0;
-  color: #1976d2;
+  color: var(--color-primary);
 }
 
 .stat-card span {
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.9em;
 }
 
 .sub-metric {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-color-light);
 }
 
 .sub-metric small {
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.8em;
 }
 
@@ -633,33 +659,33 @@ export default {
 }
 
 .stat-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  border-left: 4px solid #42a5f5;
+  box-shadow: 0 2px 8px var(--shadow-sm);
+  border-left: 4px solid var(--color-info);
   text-align: center;
 }
 
 .stat-card.warning {
-  border-left-color: #ffa726;
+  border-left-color: #ff0000;
 }
 
 .stat-card h3 {
   margin: 0 0 15px 0;
   font-size: 1.1em;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .stat-value {
   font-size: 2.2em;
   font-weight: bold;
   margin: 0;
-  color: #1976d2;
+  color: var(--color-primary);
 }
 
 .stat-card span {
-  color: #000000;
+  color: var(--text-secondary);
   font-size: 0.9em;
   display: block;
   margin-top: 5px;
@@ -668,7 +694,7 @@ export default {
 .sub-metric {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-color-light);
 }
 
 .sub-metric small {
@@ -680,17 +706,17 @@ export default {
 }
 
 .report-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-  color: white !important;
-  border-left: 4px solid #5a67d8 !important;
+  color: var(--text-primary);
+  border-left: 4px solid #17a2b8 !important;
 }
 
 .report-card h3 {
-  color: white !important;
+  color: var(--text-primary);
   margin-bottom: 8px !important;
 }
 
 .report-description {
+  color: var(--text-primary);
   font-size: 14px;
   opacity: 0.9;
   margin-bottom: 15px;
@@ -699,8 +725,8 @@ export default {
 
 .generate-report-btn {
   background: rgba(255, 255, 255, 0.2);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  color: white;
+  border: 2px solid rgb(23, 162, 184);
+  color: var(--text-primary);
   padding: 12px 24px;
   border-radius: 8px;
   font-size: 16px;
@@ -711,8 +737,8 @@ export default {
 }
 
 .generate-report-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
-  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(23, 162, 184, 0.09);
+  border-color: rgb(27, 135, 152);
   transform: translateY(-2px);
 }
 

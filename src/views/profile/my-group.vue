@@ -133,6 +133,8 @@ export default {
   padding: 20px;
   max-width: 800px;
   margin: 0 auto;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .header {
@@ -142,26 +144,28 @@ export default {
 .group-info {
   margin-top: 15px;
   padding: 15px;
-  background: #f8f9fa;
-  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
 }
 
 .group-info h3 {
   margin: 0 0 5px 0;
-  color: #333;
+  color: var(--text-primary);
   font-size: 1.3em;
 }
 
 .group-info p {
   margin: 0;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .no-group {
   padding: 15px;
-  background: #fff3cd;
-  border-radius: 8px;
-  color: #856404;
+  background: var(--color-warning-light);
+  color: var(--color-warning-dark);
+  border-radius: var(--border-radius);
+  border: 1px solid var(--color-warning);
 }
 
 .members-list {
@@ -176,14 +180,14 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 30px;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .spinner {
   width: 40px;
   height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #4CAF50;
+  border: 4px solid var(--bg-tertiary);
+  border-top: 4px solid var(--color-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 15px;
@@ -198,7 +202,7 @@ export default {
   font-size: 1.1em;
   font-weight: bold;
   margin-bottom: 15px;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .search-box {
@@ -208,32 +212,42 @@ export default {
 .search-box input {
   width: 100%;
   padding: 10px 15px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--input-text);
+  border-radius: var(--border-radius);
   font-size: 1em;
+}
+
+.search-box input:focus {
+  outline: none;
+  border-color: var(--color-primary);
 }
 
 .no-members {
   text-align: center;
   padding: 30px;
-  color: #666;
-  background: #f8f9fa;
-  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  border: 1px dashed var(--border-color);
 }
 
 .member-card {
   display: flex;
   align-items: center;
   padding: 15px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-sm);
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .member-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-md);
+  background: var(--bg-hover);
 }
 
 .member-avatar {
@@ -257,7 +271,7 @@ export default {
 
 .member-info h4 {
   margin: 0 0 5px 0;
-  color: #333;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -265,7 +279,7 @@ export default {
 
 .member-info p {
   margin: 0 0 5px 0;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.9em;
   white-space: nowrap;
   overflow: hidden;
@@ -281,22 +295,22 @@ export default {
 }
 
 .role-student {
-  background-color: #D4EDDA;
-  color: #155724;
+  background-color: var(--color-success-light);
+  color: var(--color-success-dark);
 }
 
 .role-teacher {
-  background-color: #D1ECF1;
-  color: #0C5460;
+  background-color: var(--color-info-light);
+  color: var(--color-info-dark);
 }
 
 .role-curator {
-  background-color: #E2E3E5;
-  color: #383D41;
+  background-color: var(--color-secondary-light);
+  color: var(--color-secondary-dark);
 }
 
 .role-admin {
-  background-color: #F8D7DA;
-  color: #721C24;
+  background-color: var(--color-danger-light);
+  color: var(--color-danger-dark);
 }
 </style>

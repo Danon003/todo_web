@@ -39,8 +39,10 @@ export default {
     },
 
     // Tasks
-    getTasks() {
-        return api.get('/task')
+    getTasks(page = 0, size = 20) {
+        return api.get('/task', {
+            params: { page, size }
+        })
     },
     createTask(taskData) {
         return api.post('/task', taskData)
@@ -51,15 +53,15 @@ export default {
     deleteTask(taskId) {
         return api.delete(`/task/${taskId}`)
     },
-    getMyTasks() {
-        return api.get('/task/my')
+    getMyTasks(page = 0, size = 20) {
+        return api.get('/task/my', {
+            params: { page, size }
+        })
     },
     getMyTask(taskId) {
         return api.get(`/task/my/${taskId}`)
     },
-    updateTaskStatus(taskId, status) {
-        return api.post(`/task/my/${taskId}/status`, { status });
-    },
+
     shareTask(taskId, userId) {
         return api.post(`/task/my/${taskId}/share/${userId}`)
     },
@@ -126,8 +128,10 @@ export default {
     },
 
     // Groups
-    getGroups() {
-        return api.get('/group')
+    getGroups(page = 0, size = 20) {
+        return api.get('/group', {
+            params: { page, size }
+        })
     },
     createGroup(groupData) {
         return api.post('/group', groupData, {
@@ -165,8 +169,14 @@ export default {
     },
 
     // Users
-    getUsers() {
-        return api.get('/admin/users')
+    getUsers(page = 0, size = 15, sort = 'id,asc') {
+        return api.get('/admin/users', {
+            params: {
+                page: page,
+                size: size,
+                sort: sort
+            }
+        });
     },
     createUser(userData) {
         return api.post('/admin/users', userData)
@@ -177,8 +187,15 @@ export default {
     deleteUser(userId) {
         return api.delete(`/admin/users/${userId}/delete`)
     },
-    getUsersByRole(role) {
-        return api.get(`/admin/users/by-role?role=${role}`)
+    getUsersByRole(role, page = 0, size = 15, sort = 'id,asc') {
+        return api.get('/admin/users/by-role', {
+            params: {
+                role: role,
+                page: page,
+                size: size,
+                sort: sort
+            }
+        });
     },
     getRoleAuditLog(){
         return api.get('admin/role-audit-log')
@@ -204,8 +221,10 @@ export default {
         return api.get('/admin/statistic');
     },
 
-    getTaskComments (taskId) {
-        return api.get(`/task/${taskId}/comments`)
+    getTaskComments (taskId, page = 0, size = 20) {
+        return api.get(`/task/${taskId}/comments`, {
+            params: { page, size }
+        })
     },
     createComment (taskId, commentData) {
         return api.post(`/task/${taskId}/comments`, commentData)
@@ -229,13 +248,20 @@ export default {
     getNotification: (params) => axios.get(`${NOTIFICATION_API}/notifications`, {
         params: {
             userId: params.userId,
-            limit: params?.limit || 50
+            page: params?.page || 0,
+            size: params?.size || 15,
+            sort: params?.sort || 'createdAt,desc'
         },
         headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
     }),
 
-    getUnreadNotifications: () => axios.get(`${NOTIFICATION_API}/notifications/unread`, {
-        params: { userId: localStorage.getItem('userId') },
+    getUnreadNotifications: (params) => axios.get(`${NOTIFICATION_API}/notifications/unread`, {
+        params: {
+            userId: params.userId,
+            page: params?.page || 0,
+            size: params?.size || 15,
+            sort: params?.sort || 'createdAt,desc'
+        },
         headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
     }),
 
@@ -252,12 +278,6 @@ export default {
         headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
     }),
 
-    getUnreadCount: () => axios.get(`${NOTIFICATION_API}/notifications/unread-count`, {
-        params: { userId: localStorage.getItem('userId') },
-        headers: { Authorization: `Bearer ${localStorage.getItem('jwt-token')}` }
-    }),
-
-
     getStudentSolutionDownloadUrl(taskId) {
         return api.get(`/minio/tasks/${taskId}/solution/download`)
     },
@@ -265,15 +285,6 @@ export default {
     // Video Meetings
     getVideoMeetings() {
         return api.get('/video-meetings')
-    },
-    getMyVideoMeetings() {
-        return api.get('/video-meetings/my-meetings')
-    },
-    getVideoMeetingsByGroup(groupId) {
-        return api.get(`/video-meetings/group/${groupId}`)
-    },
-    getVideoMeeting(meetingId) {
-        return api.get(`/video-meetings/${meetingId}`)
     },
     createVideoMeeting(meetingData) {
         return api.post('/video-meetings', meetingData)
@@ -287,7 +298,60 @@ export default {
     getVideoMeetingJoinUrl(meetingId) {
         return api.get(`/video-meetings/${meetingId}/join`)
     },
-    getVideoMeetingEmbed(meetingId) {
-        return axios.get(`/video-meetings/${meetingId}/embed`)
+    completeVideoMeeting(meetingId) {
+        return api.post(`/video-meetings/${meetingId}/complete`)
     },
+
+    // Kanban
+    getKanbanBoard(startDate, endDate) {
+        return api.get('/kanban', { params: { startDate, endDate } })
+    },
+    moveKanbanTask(id, data) {
+        return api.put(`/kanban/${id}/move`, data)
+    },
+    optimizeKanban(dailyLimit, bufferDays) {
+        return api.post('/kanban/optimize', null, { params: { dailyLimit, bufferDays } })
+    },
+    applyOptimization(items) {
+        return api.post('/kanban/optimize/apply', { items })
+    },
+    getKanbanInsights(startDate, endDate) {
+        return api.get('/kanban/insights', { params: { startDate, endDate } })
+    },
+    whatIfKanban(minDailyLimit, maxDailyLimit, minBuffer, maxBuffer) {
+        return api.get('/kanban/optimize/what-if', {
+            params: { minDailyLimit, maxDailyLimit, minBuffer, maxBuffer }
+        })
+    },
+    getKanbanWeeklyPlan(weekStart) {
+        return api.get('/kanban/coach/weekly-plan', { params: { weekStart } })
+    },
+    // Активные задачи студента (без просроченных)
+    getMyActiveTasks(page = 0, size = 20) {
+        return api.get('/task/my/active', {
+            params: { page, size }
+        })
+    },
+
+    // Удалить все просроченные назначения студента
+    deleteOverdueTasks() {
+        return api.delete('/task/my/overdue')
+    },
+
+    // Студент меняет приоритет своего назначения
+    updateTaskPriority(taskId, priority) {
+        return api.put(`/task/my/${taskId}/priority`, { priority })
+    },
+
+    // Массовое назначение задач на группы
+    bulkAssignToGroups(taskIds, groupIds) {
+        return api.post('/task/assign/groups', { taskIds, groupIds })
+    },
+
+    getActiveTasks(page = 0, size = 20){
+        return api.get('/task/active', {
+            params: { page, size }
+        })
+    },
+
 }

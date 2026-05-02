@@ -44,7 +44,7 @@
     <!-- Вкладка: Пользователи -->
     <div v-if="activeTab === 'users'" class="users-tab">
       <div class="filters">
-        <select v-model="filterRole" class="filter-select" @change="fetchUsers">
+        <select v-model="filterRole" @change="onFilterChange" class="filter-select">
           <option value="all">Все пользователи</option>
           <option value="STUDENT">Студенты</option>
           <option value="TEACHER">Преподаватели</option>
@@ -70,6 +70,37 @@
             <button @click="openDeleteConfirm(user)" class="delete-btn">Удалить</button>
           </div>
         </div>
+      </div>
+
+      <div class="pagination users-pagination" v-if="usersTotalElements > 0">
+        <button
+            @click="prevUsersPage"
+            :disabled="usersCurrentPage === 1 || usersLoading"
+            class="pagination-btn"
+        >
+          ← Назад
+        </button>
+
+        <span class="pagination-info">
+          Страница {{ usersCurrentPage }} из {{ usersTotalPages }}
+          (всего: {{ usersTotalElements }} пользователей)
+        </span>
+
+        <button
+            @click="nextUsersPage"
+            :disabled="usersCurrentPage === usersTotalPages || usersLoading"
+            class="pagination-btn"
+        >
+          Вперед →
+        </button>
+
+        <select v-model="pageSizeUsers" @change="changeUsersPageSize" class="page-size-select">
+          <option value="5">5 на странице</option>
+          <option value="10">10 на странице</option>
+          <option value="15">15 на странице</option>
+          <option value="20">20 на странице</option>
+          <option value="50">50 на странице</option>
+        </select>
       </div>
 
       <!-- Модальное окно создания пользователя -->
@@ -183,67 +214,64 @@
     </div>
   </div>
 </template>
+
 <script>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import api from "@/api/index.js";
 
 export default {
   name: 'Users',
   setup() {
     const users = ref([]);
-    const auditLogs = ref([]);
     const filterRole = ref('all');
+    const usersCurrentPage = ref(1);
+    const pageSizeUsers = ref(15);
+    const usersLoading = ref(false);
+    const totalUsersCount = ref(0);
+
+    // Переменные для аудита
+    const auditLogs = ref([]);
+    const auditLoading = ref(false);
+    const auditError = ref('');
+
+    // Общие переменные
     const activeTab = ref('users');
     const showCreateModal = ref(false);
     const showDeleteConfirm = ref(false);
     const userToDelete = ref(null);
-    const auditLoading = ref(false);
-    const auditError = ref('');
+    const newUser = ref({
+      username: '',
+      email: '',
+      password: ''
+    });
+    const onFilterChange = () => {
+      usersCurrentPage.value = 1; // Сбрасываем на первую страницу
+      fetchUsers();
+    };
 
-    // Пагинация и сортировка
+    // Пагинация и сортировка для аудита
     const currentPage = ref(1);
     const pageSize = ref(20);
-    const sortOrder = ref('newest'); // 'newest' или 'oldest'
+    const sortOrder = ref('newest');
 
-    // Переменные для уведомлений
+    // Тосты
     const toast = ref({
       show: false,
       message: '',
       type: 'success'
     });
 
-    const showToast = (message, type = 'success') => {
-      toast.value = {
-        show: true,
-        message,
-        type
-      };
 
-      setTimeout(() => {
-        hideToast();
-      }, 4000);
-    };
-
-    const hideToast = () => {
-      toast.value.show = false;
-    };
-
-    const newUser = ref({
-      username: '',
-      email: '',
-      password: ''
-    });
-
-    // Вычисляемые свойства для пагинации и сортировки
     const sortedAuditLogs = computed(() => {
       const logs = [...auditLogs.value];
-
       if (sortOrder.value === 'newest') {
         return logs.sort((a, b) => new Date(b.changedAt) - new Date(a.changedAt));
       } else {
         return logs.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt));
       }
     });
+
+    const usersTotalElements = computed( () => totalUsersCount.value);
 
     const totalPages = computed(() => {
       return Math.ceil(sortedAuditLogs.value.length / pageSize.value);
@@ -255,46 +283,151 @@ export default {
       return sortedAuditLogs.value.slice(start, end);
     });
 
+    // МЕТОДЫ
+    const showToast = (message, type = 'success') => {
+      toast.value = {
+        show: true,
+        message,
+        type
+      };
+      setTimeout(() => {
+        hideToast();
+      }, 4000);
+    };
+
+    const hideToast = () => {
+      toast.value.show = false;
+    };
+
     const fetchUsers = async () => {
+      usersLoading.value = true;
       try {
         let response;
 
         if (filterRole.value !== 'all') {
-          response = await api.getUsersByRole(filterRole.value);
+          response = await api.getUsersByRole(
+              filterRole.value,
+              usersCurrentPage.value - 1,
+              pageSizeUsers.value
+          );
         } else {
-          response = await api.getUsers();
+          response = await api.getUsers(
+              usersCurrentPage.value - 1,
+              pageSizeUsers.value
+          );
         }
 
-        users.value = response.data.map(user => ({
-          ...user,
-          role: user.role.replace('ROLE_', ''),
-          newRole: user.role.replace('ROLE_', '')
-        }));
+        console.log('API Response:', response.data);
+
+        // Функция для очистки роли от всех префиксов ROLE_
+        const cleanRole = (role) => {
+          if (!role) return '';
+          // Удаляем все вхождения ROLE_ (на случай множественных префиксов)
+          return role.replace(/ROLE_/g, '');
+        };
+
+        if (response.data && Array.isArray(response.data.content)) {
+          users.value = response.data.content.map(user => ({
+            ...user,
+            // Очищаем роль от всех ROLE_ префиксов
+            role: cleanRole(user.role),
+            newRole: cleanRole(user.role) // для выпадающего списка
+          }));
+          totalUsersCount.value = response.data.totalElements || 0;
+        } else if (Array.isArray(response.data)) {
+          users.value = response.data.map(user => ({
+            ...user,
+            role: cleanRole(user.role),
+            newRole: cleanRole(user.role)
+          }));
+          totalUsersCount.value = response.data.length;
+        } else {
+          users.value = [];
+          totalUsersCount.value = 0;
+        }
 
       } catch (error) {
         console.error('Ошибка при получении пользователей:', error);
         showToast('Ошибка при загрузке пользователей', 'error');
+        users.value = [];
+        totalUsersCount.value = 0;
+      } finally {
+        usersLoading.value = false;
       }
     };
 
+    // Метод для аудита
     const fetchAuditLogs = async () => {
       auditLoading.value = true;
       auditError.value = '';
-      currentPage.value = 1; // Сбрасываем на первую страницу при новой загрузке
 
       try {
-        const response = await api.getRoleAuditLog();
-        auditLogs.value = response.data;
+        // Используем новый метод с пагинацией
+        const response = await api.getRoleAuditLog(
+            currentPage.value - 1, // Spring ждет 0-based
+            pageSize.value,
+            sortOrder.value === 'newest' ? 'changedAt,desc' : 'changedAt,asc'
+        );
+
+        // Проверяем структуру ответа
+        if (response.data && response.data.content) {
+          auditLogs.value = response.data.content;
+        } else {
+          // Для обратной совместимости
+          auditLogs.value = response.data || [];
+        }
       } catch (error) {
         console.error('Ошибка при загрузке истории изменений:', error);
-        auditError.value = error.response?.data?.message || 'Не удалось загрузить историю';
-        showToast('Ошибка при загрузке истории изменений', 'error');
+        // Если пагинация не работает, пробуем старый метод
+        try {
+          const legacyResponse = await api.getRoleAuditLog();
+          auditLogs.value = legacyResponse.data;
+        } catch (e) {
+          auditError.value = error.response?.data?.message || 'Не удалось загрузить историю';
+          showToast('Ошибка при загрузке истории изменений', 'error');
+        }
       } finally {
         auditLoading.value = false;
       }
     };
 
-    // Методы пагинации
+    // WATCHERS для автоматической загрузки
+    watch([usersCurrentPage, pageSizeUsers], () => {
+      if (activeTab.value === 'users') {
+        fetchUsers();
+      }
+    });
+
+    watch([currentPage, pageSize, sortOrder], () => {
+      if (activeTab.value === 'audit') {
+        fetchAuditLogs();
+      }
+    });
+
+    watch(filterRole, () => {
+      if (activeTab.value === 'users') {
+        usersCurrentPage.value = 1; // Сбрасываем на первую страницу
+        fetchUsers();
+      }
+    });
+    // Методы навигации для пользователей
+    const nextUsersPage = () => {
+      if (usersCurrentPage.value < usersTotalPages.value) {
+        usersCurrentPage.value++;
+      }
+    };
+
+    const prevUsersPage = () => {
+      if (usersCurrentPage.value > 1) {
+        usersCurrentPage.value--;
+      }
+    };
+
+    const changeUsersPageSize = () => {
+      usersCurrentPage.value = 1;
+    };
+
+    // Методы навигации для аудита
     const nextPage = () => {
       if (currentPage.value < totalPages.value) {
         currentPage.value++;
@@ -308,44 +441,37 @@ export default {
     };
 
     const applySorting = () => {
-      currentPage.value = 1; // Сбрасываем на первую страницу при изменении сортировки
+      currentPage.value = 1;
     };
 
     const onPageSizeChange = () => {
-      currentPage.value = 1; // Сбрасываем на первую страницу при изменении размера страницы
+      currentPage.value = 1;
     };
 
     const switchTab = (tabName) => {
       activeTab.value = tabName;
       if (tabName === 'audit') {
+        currentPage.value = 1;
         fetchAuditLogs();
+      } else {
+        // При переключении на пользователей сбрасываем фильтры и пагинацию
+        usersCurrentPage.value = 1;
+        filterRole.value = 'all'; // Сбрасываем фильтр
+        fetchUsers(); // Загружаем пользователей
       }
     };
 
-    onMounted(() => {
-      fetchUsers();
-      if (activeTab.value === 'audit') {
-        fetchAuditLogs();
-      }
-    });
-
-    const filteredUsers = computed(() => {
-      if (filterRole.value === 'all') {
-        return users.value;
-      }
-      return users.value.filter(user => user.role === filterRole.value);
-    });
-
+    // Вспомогательные методы
     const getRoleText = (role) => {
+      // Очищаем роль от всех ROLE_ префиксов
+      const cleanRole = role ? role.replace(/ROLE_/g, '') : '';
+
       const roleMap = {
         'STUDENT': 'Студент',
         'TEACHER': 'Преподаватель',
-        'ADMIN': 'Администратор',
-        'ROLE_STUDENT': 'Студент',
-        'ROLE_TEACHER': 'Преподаватель',
-        'ROLE_ADMIN': 'Администратор'
+        'ADMIN': 'Администратор'
       };
-      return roleMap[role] || role;
+      return roleMap[cleanRole] || cleanRole || role;
     };
 
     const formatDateTime = (dateString) => {
@@ -359,21 +485,41 @@ export default {
         minute: '2-digit'
       });
     };
+    const filteredUsers = computed(() => {
+      if (filterRole.value === 'all') {
+        return users.value;
+      }
+      // При фильтрации сравниваем очищенные роли
+      return users.value.filter(user => {
+        const userCleanRole = user.role.replace(/ROLE_/g, '');
+        return userCleanRole === filterRole.value;
+      });
+    });
 
+    const usersTotalPages = computed(() => {
+      return Math.ceil(totalUsersCount.value / pageSizeUsers.value);
+    });
+
+    const totalElements = computed(() => totalUsersCount.value);
+
+    // CRUD операции
     const createUser = async () => {
       try {
         await api.createUser(newUser.value);
 
         showCreateModal.value = false;
         showToast('Пользователь успешно создан');
+
+        // Перезагружаем пользователей
+        usersCurrentPage.value = 1;
         await fetchUsers();
 
+        // Сбрасываем форму
         newUser.value = {
           username: '',
           email: '',
           password: ''
         };
-
       } catch (error) {
         console.error('Ошибка при создании пользователя:', error);
         showToast('Ошибка при создании пользователя', 'error');
@@ -382,21 +528,36 @@ export default {
 
     const updateUserRole = async (user) => {
       try {
-        await api.updateUserRole(user.id, user.newRole);
+        // Проверяем, что newRole не содержит префикса
+        let newRole = user.newRole;
+
+        // Если роль уже содержит ROLE_, удаляем
+        if (newRole.startsWith('ROLE_')) {
+          newRole = newRole.replace('ROLE_', '');
+        }
+
+        console.log(`Обновление роли пользователя ${user.id}: ${user.role} -> ${newRole}`);
+
+        // Отправляем с одним префиксом ROLE_
+        await api.updateUserRole(user.id, `ROLE_${newRole}`);
+
         showToast('Роль пользователя успешно обновлена');
+
+        // Обновляем данные
         await fetchUsers();
-        // После изменения роли обновляем историю
+
+        // Если открыта вкладка аудита, обновляем её
         if (activeTab.value === 'audit') {
           await fetchAuditLogs();
         }
       } catch (error) {
         console.error('Ошибка при обновлении роли:', error);
 
+        // Откатываем изменение в UI
         const originalUser = users.value.find(u => u.id === user.id);
         if (originalUser) {
           user.newRole = originalUser.role;
         }
-
         showToast('Ошибка при обновлении роли', 'error');
       }
     };
@@ -426,11 +587,16 @@ export default {
       userToDelete.value = null;
     };
 
+    // Инициализация
+    onMounted(() => {
+      fetchUsers();
+    });
+
     return {
+      // Данные
       users,
       auditLogs,
-      filteredUsers,
-      filterRole,
+      filterRole, // Убираем filteredUsers из return
       activeTab,
       showCreateModal,
       showDeleteConfirm,
@@ -438,13 +604,22 @@ export default {
       newUser,
       auditLoading,
       auditError,
-      // Пагинация и сортировка
+
+      // Пагинация пользователей
+      usersCurrentPage,
+      pageSizeUsers,
+      usersLoading,
+      usersTotalPages,
+      usersTotalElements,
+      // Пагинация аудита
       currentPage,
       pageSize,
       sortOrder,
       sortedAuditLogs,
       totalPages,
       paginatedAuditLogs,
+
+      // Методы
       getRoleText,
       formatDateTime,
       createUser,
@@ -458,14 +633,22 @@ export default {
       prevPage,
       applySorting,
       onPageSizeChange,
+      nextUsersPage,
+      prevUsersPage,
+      changeUsersPageSize,
+      totalUsersCount,
+      totalElements,
+
+      // Тосты
       toast,
       switchTab,
-      hideToast
+      hideToast,
+      onFilterChange,
+      filteredUsers,
     };
   }
 };
 </script>
-
 
 
 <style scoped>
@@ -544,7 +727,7 @@ export default {
 }
 
 .modal-content {
-  background: white;
+  background: var(--bg-card);
   padding: 25px;
   border-radius: 8px;
   width: 400px;
@@ -597,6 +780,8 @@ export default {
 /* Остальные стили без изменений */
 .users-container {
   padding: 20px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .users-header {
@@ -633,10 +818,10 @@ export default {
 }
 
 .user-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
   padding: 15px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-sm);
   display: flex;
   justify-content: space-between;
 }
@@ -651,7 +836,7 @@ export default {
 
 .user-info p {
   margin: 0 0 5px 0;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .role-badge {
@@ -764,16 +949,18 @@ export default {
   font-size: 1em;
   border-bottom: 3px solid transparent;
   transition: all 0.3s ease;
+  color: var(--text-secondary);
 }
 
 .tabs button.active {
   border-bottom-color: #17A2B8;
   font-weight: bold;
-  color: #17A2B8;
+  color: var(--color-primary);
 }
 
 .tabs button:hover:not(.active) {
-  background-color: #f8f9fa;
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* Стили для вкладки аудита */
@@ -790,7 +977,7 @@ export default {
 
 .audit-header h3 {
   margin: 0;
-  color: #495057;
+  color: var(--text-primary);
 }
 
 .refresh-btn {
@@ -819,10 +1006,10 @@ export default {
 }
 
 .audit-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
   padding: 16px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-sm);
   border-left: 4px solid #17A2B8;
 }
 
@@ -877,7 +1064,7 @@ export default {
 }
 
 .change-date {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.85em;
   white-space: nowrap;
 }
@@ -885,23 +1072,24 @@ export default {
 .loading {
   text-align: center;
   padding: 40px;
-  color: #6c757d;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .error-message {
-  background: #f8d7da;
-  color: #721c24;
+  background: var(--color-danger-light);
+  color: var(--color-danger);
   padding: 15px;
   border-radius: 4px;
   margin-bottom: 15px;
   text-align: center;
+  border: 1px solid var(--color-danger);
 }
 
 .no-data {
   text-align: center;
   padding: 40px;
-  color: #6c757d;
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -960,7 +1148,7 @@ export default {
 
 .audit-header h3 {
   margin: 0;
-  color: #495057;
+  color: var(--text-primary);
 }
 
 .audit-controls {
@@ -1004,11 +1192,12 @@ export default {
 }
 
 .audit-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 8px;
   padding: 16px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  border-left: 4px solid #17A2B8;
+  box-shadow: var(--shadow-sm);
+  border-left: 4px solid var(--color-primary);
+  border: 1px solid var(--border-color);
 }
 
 .audit-info {
@@ -1025,12 +1214,12 @@ export default {
 .user-info strong {
   display: block;
   margin-bottom: 4px;
-  color: #495057;
+  color: var(--text-primary);
 }
 
 .user-email {
   font-size: 0.9em;
-  color: #6c757d;
+  color: var(--text-secondary);
 }
 
 .role-changes {
@@ -1042,27 +1231,31 @@ export default {
 
 .old-role {
   padding: 4px 8px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary);
   border-radius: 4px;
-  color: #6c757d;
+  color: var(--text-secondary);
   font-size: 0.9em;
 }
 
 .arrow {
-  color: #17A2B8;
+  color: var(--color-primary);
   font-weight: bold;
 }
 
 .new-role {
   padding: 4px 8px;
-  background-color: #e8f5e8;
+  background-color: var(--color-success-light);
   border-radius: 4px;
-  color: #155724;
+  color: var(--color-success);
   font-size: 0.9em;
 }
 
+[data-theme="dark"] .new-role {
+  color: var(--color-success);
+}
+
 .change-date {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.85em;
   white-space: nowrap;
 }
@@ -1099,7 +1292,7 @@ export default {
 }
 
 .pagination-info {
-  color: #6c757d;
+  color: var(--text-muted);
   font-size: 0.9em;
 }
 
@@ -1114,37 +1307,39 @@ export default {
 
 .page-size-selector label {
   font-size: 0.9em;
-  color: #6c757d;
+  color: var(--text-secondary);
 }
 
 .page-size-select {
   padding: 6px 10px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
-  background: white;
+  background: var(--input-bg);
+  color: var(--input-text);
   font-size: 0.9em;
 }
 
 .loading {
   text-align: center;
   padding: 40px;
-  color: #6c757d;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .error-message {
-  background: #f8d7da;
-  color: #721c24;
+  background: var(--color-danger-light);
+  color: var(--color-danger);
   padding: 15px;
   border-radius: 4px;
   margin-bottom: 15px;
   text-align: center;
+  border: 1px solid var(--color-danger);
 }
 
 .no-data {
   text-align: center;
   padding: 40px;
-  color: #6c757d;
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -1160,6 +1355,20 @@ export default {
 
 .retry-btn:hover {
   background: #c82333;
+}
+
+.users-pagination {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Добавляем индикатор загрузки */
+.loading-indicator {
+  text-align: center;
+  padding: 10px;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 /* Адаптивность */

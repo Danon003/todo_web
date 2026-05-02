@@ -45,20 +45,22 @@
               <p>{{ student.email }}</p>
             </div>
 
-            <button
-                v-if="user.role === 'ROLE_TEACHER'"
-                @click="checkStudentTask(student.id)"
-                class="check-btn"
-            >
-              Назначенные задачи
-            </button>
-            <button
-                v-if="user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER'"
-                @click="openRemoveStudentConfirm(student)"
-                class="remove-btn"
-            >
-              Удалить
-            </button>
+            <div class="student-actions">
+              <button
+                  v-if="user.role === 'ROLE_TEACHER'"
+                  @click="checkStudentTask(student.id)"
+                  class="check-btn"
+              >
+                Назначенные задачи
+              </button>
+              <button
+                  v-if="user.role === 'ROLE_ADMIN' || user.role === 'ROLE_TEACHER'"
+                  @click="openRemoveStudentConfirm(student)"
+                  class="remove-btn"
+              >
+                Удалить
+              </button>
+            </div>
           </div>
         </div>
 
@@ -352,15 +354,58 @@ export default {
     const checkStudentTask = async (studentId) => {
       loadingTasks.value = true;
       try {
-        // Находим студента по ID
         const student = students.value.find(s => s.id === studentId);
         currentStudent.value = student;
 
-        // Загружаем его задачи
         const response = await api.getStudentTasks(studentId);
-        studentTasks.value = response.data;
+        console.log('Raw response:', response.data);
 
-        // Переключаемся на вкладку с задачами
+        // Извлекаем массив задач из пагинированного ответа
+        let tasks = [];
+        if (response.data && response.data.content && Array.isArray(response.data.content)) {
+          tasks = response.data.content;
+        } else if (Array.isArray(response.data)) {
+          tasks = response.data;
+        }
+
+        console.log('Tasks array:', tasks);
+
+        // Трансформируем задачи
+        studentTasks.value = tasks.map(task => {
+          // Пробуем найти статус в разных местах
+          let userStatus = 'NOT_STARTED';
+
+          // Вариант 1: статус прямо в задаче
+          if (task.status) {
+            userStatus = task.status;
+          }
+          // Вариант 2: статус в taskAssignment
+          else if (task.taskAssignment?.status) {
+            userStatus = task.taskAssignment.status;
+          }
+          // Вариант 3: статус в assignments
+          else if (task.assignments && task.assignments.length > 0) {
+            // Если есть назначения, берем статус первого (так как задачи уже для конкретного студента)
+            userStatus = task.assignments[0]?.status || 'NOT_STARTED';
+          }
+          // Вариант 4: статус в userStatus
+          else if (task.userStatus) {
+            userStatus = task.userStatus;
+          }
+
+          console.log(`Task ${task.id} status:`, userStatus);
+
+          return {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            deadline: task.deadline,
+            userStatus: userStatus,
+            rawTask: task // для отладки
+          };
+        });
+
+        console.log('Processed tasks:', studentTasks.value);
         activeTab.value = 'student-tasks';
       } catch (error) {
         console.error('Ошибка при загрузке задач студента:', error);
@@ -369,6 +414,7 @@ export default {
         loadingTasks.value = false;
       }
     };
+
 
     const backToStudents = () => {
       activeTab.value = 'students';
@@ -425,8 +471,17 @@ export default {
 
       try {
         // Загружаем всех студентов системы
-        const availableResponse = await api.getUsersByRole('STUDENT');
-        availableStudents.value = availableResponse.data;
+        const availableResponse = await api.getUsersByRole('STUDENT', 0, 1000); // Загружаем всех студентов
+        const data = availableResponse.data;
+
+        // Обрабатываем пагинированный ответ
+        if (data && Array.isArray(data.content)) {
+          availableStudents.value = data.content;
+        } else if (Array.isArray(data)) {
+          availableStudents.value = data;
+        } else {
+          availableStudents.value = [];
+        }
 
         // Параллельно загружаем информацию о том, кто уже в группах
         await fetchStudentsInGroups();
@@ -434,6 +489,7 @@ export default {
         console.error('Ошибка при загрузке доступных студентов:', error);
         availableStudentsError.value = error.message || 'Неизвестная ошибка';
         showToast('Не удалось загрузить список студентов', 'error');
+        availableStudents.value = [];
       } finally {
         availableStudentsLoading.value = false;
       }
@@ -517,512 +573,262 @@ export default {
 </script>
 
 <style scoped>
-/* Стили для модалки подтверждения */
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0,0,0,0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: white;
-  padding: 25px;
-  border-radius: 8px;
-  width: 400px;
-  max-width: 90%;
-  text-align: center;
-}
-
-.modal-content h3 {
-  margin: 0 0 15px 0;
-  color: #dc3545;
-}
-
-.modal-content p {
-  margin: 0 0 20px 0;
-  color: #666;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-}
-
-.delete-btn {
-  background-color: #dc3545;
-  color: white;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.delete-btn:hover {
-  background-color: #c82333;
-}
-
-.cancel-btn {
-  background-color: #6c757d;
-  color: white;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.cancel-btn:hover {
-  background-color: #5a6268;
-}
-
-/* НОВЫЕ СТИЛИ ДЛЯ ИНТЕРФЕЙСА ДОБАВЛЕНИЯ СТУДЕНТОВ */
-.add-student-section {
-  margin-top: 30px;
-  padding: 20px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-}
-
-.add-student-title {
-  margin: 0 0 20px 0;
-  color: #495057;
-  font-size: 1.3em;
-}
-
-.available-students-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 15px;
-  margin-bottom: 20px;
-}
-
-.student-select-item {
-  background: white;
-  border: 2px solid #e9ecef;
-  border-radius: 8px;
-  padding: 15px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.student-select-item:hover {
-  border-color: #17A2B8;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-
-.student-select-item.selected {
-  border-color: #28a745;
-  background-color: #f8fff9;
-}
-
-.student-select-item.in-group {
-  border-color: #ffc107;
-  background-color: #fffcf3;
-  cursor: not-allowed;
-}
-
-.student-select-item.in-group:hover {
-  transform: none;
-  box-shadow: none;
-  border-color: #ffc107;
-}
-
-.student-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #17A2B8, #6f42c1);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  font-size: 0.9em;
-  flex-shrink: 0;
-}
-
-.student-info {
-  flex: 1;
-}
-
-.student-info h4 {
-  margin: 0 0 5px 0;
-  color: #495057;
-  font-size: 1em;
-}
-
-.student-info p {
-  margin: 0;
-  font-size: 0.85em;
-}
-
-.student-info .already-in-group {
-  color: #e0a800;
-  font-weight: 500;
-  margin-top: 5px;
-}
-
-.student-info .can-add {
-  color: #28a745;
-  font-weight: 500;
-  margin-top: 5px;
-}
-
-.loading-students {
-  text-align: center;
-  padding: 20px;
-  color: #6c757d;
-  font-style: italic;
-}
-
-.error-message {
-  background: #f8d7da;
-  color: #721c24;
-  padding: 15px;
-  border-radius: 4px;
-  margin-bottom: 15px;
-  text-align: center;
-}
-
-.retry-btn {
-  background: #dc3545;
-  color: white;
-  border: none;
-  padding: 5px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  margin-left: 10px;
-}
-
-.retry-btn:hover {
-  background: #c82333;
-}
-
-.no-students {
-  text-align: center;
-  padding: 30px;
-  color: #6c757d;
-  font-style: italic;
-  grid-column: 1 / -1;
-}
-
-.add-student-btn {
-  width: 100%;
-  padding: 12px;
-  background: #28a745;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 1em;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.3s;
-}
-
-.add-student-btn:hover:not(:disabled) {
-  background: #218838;
-}
-
-.add-student-btn:disabled {
-  background: #6c757d;
-  cursor: not-allowed;
-}
-
-/* Остальные существующие стили без изменений */
 .group-detail {
   padding: 20px;
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto;
-  overflow: visible;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
 }
 
 .loading, .not-found {
   text-align: center;
   padding: 50px;
   font-size: 1.2em;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  margin: 20px 0;
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--bg-tertiary);
+  border-top: 4px solid var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.not-found {
+  background: var(--color-warning-light);
+  color: var(--color-warning-dark);
+  border: 1px solid var(--color-warning);
+}
+
+.group-content {
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+  /* Разрешаем выпадающему списку студентов выходить за пределы карточки */
+  overflow: visible;
+  box-shadow: var(--shadow-md);
 }
 
 .group-header {
-  margin-bottom: 20px;
+  padding: 25px;
+  background: linear-gradient(135deg, var(--color-primary-light), var(--color-info-light));
+  border-bottom: 1px solid var(--border-color);
 }
 
-.description {
-  color: #666;
+.group-header h2 {
+  margin: 0 0 10px 0;
+  color: var(--text-primary);
+  font-size: 1.8em;
+  font-weight: 600;
+}
+
+.group-header .description {
+  color: var(--text-secondary);
+  font-size: 1.1em;
+  margin: 0;
+  line-height: 1.5;
 }
 
 .tabs {
   display: flex;
-  border-bottom: 1px solid #ddd;
-  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  padding: 0 25px;
 }
 
 .tabs button {
   display: block;
-  padding: 10px 20px;
+  padding: 15px 25px;
   background: none;
   border: none;
   cursor: pointer;
   font-size: 1em;
+  color: var(--text-secondary);
   border-bottom: 3px solid transparent;
+  transition: all 0.3s ease;
+  font-weight: 500;
+  position: relative;
+}
+
+.tabs button:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .tabs button.active {
-  border-bottom-color: #17A2B8;
-  font-weight: bold;
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tabs button.active::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--color-primary);
+  border-radius: 3px 3px 0 0;
+}
+
+.students-tab {
+  padding: 25px;
+  /* Немного увеличиваем “воздух” для списка и дропдауна */
+  min-height: 400px;
+}
+
+.button-back {
+  margin-bottom: 25px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.back-btn {
+  background: var(--color-primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 10px 20px;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  font-size: 0.95em;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  gap: 8px;
+}
+
+.back-btn:hover {
+  background: var(--color-primary-dark);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .students-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 15px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
 }
 
 .student-card {
-  background: white;
-  border-radius: 8px;
-  padding: 15px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  justify-content: space-between;
-  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.student-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary);
+}
+
+.student-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .student-info h4 {
-  margin: 0 0 5px 0;
+  margin: 0 0 8px 0;
+  color: var(--text-primary);
+  font-size: 1.1em;
+  font-weight: 600;
 }
 
 .student-info p {
   margin: 0;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.9em;
 }
 
-.remove-btn {
-  background-color: #DC3545;
-  color: white;
-  padding: 5px 10px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
+.student-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
 }
 
 .check-btn {
-  background-color: #bb8213;
-  color: white;
-  padding: 5px 10px;
-  margin-right: 5px;
+  background-color: var(--color-warning);
+  color: var(--btn-warning-text);
+  padding: 8px 16px;
   border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.button-back {
-  margin-left: auto;
-  display: flex;
-  justify-content: right;
-  margin-bottom: 20px;
-}
-
-.tasks-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 15px;
-}
-
-.task-card {
-  background: white;
-  border-radius: 8px;
-  padding: 15px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.task-card h4 {
-  margin: 0 0 10px 0;
-}
-
-.deadline {
-  color: #666;
-  font-size: 0.9em;
-  margin: 5px 0;
-}
-
-.status {
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-weight: bold;
-  display: inline-block;
-  margin: 5px 0;
-}
-
-.status-pending {
-  background-color: #FFF3CD;
-  color: #856404;
-}
-
-.status-in_progress {
-  background-color: #D1ECF1;
-  color: #0C5460;
-}
-
-.status-completed {
-  background-color: #D4EDDA;
-  color: #155724;
-}
-
-.assign-btn {
-  background-color: #17A2B8;
-  color: white;
-  padding: 5px 10px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  margin-top: 10px;
-}
-
-.student-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  border-bottom: 1px solid #ffffff;
-  padding-bottom: 10px;
-}
-
-.back-btn {
-  background: #7fb3e0;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: right;
-  border: none;
-  padding: 8px 12px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.9em;
-}
-
-.no-tasks {
-  text-align: center;
-  color: #666;
-  padding: 20px;
-  font-style: italic;
-}
-
-.status {
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-weight: bold;
-  display: inline-block;
-  font-size: 0.85em;
-}
-
-.status-not_started,
-.status-NOT_STARTED {
-  background-color: #FFF3CD;
-  color: #856404;
-}
-
-.status-in_progress,
-.status-IN_PROGRESS {
-  background-color: #D1ECF1;
-  color: #0C5460;
-}
-
-.status-completed,
-.status-COMPLETED {
-  background-color: #D4EDDA;
-  color: #155724;
-}
-
-.status-overdue,
-.status-OVERDUE {
-  background-color: #f8d7da;
-  color: #721c24;
-}
-
-.toast {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  padding: 15px 20px;
-  border-radius: 8px;
-  color: white;
   font-weight: 500;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 300px;
-  max-width: 400px;
-  z-index: 1000;
-  animation: slideIn 0.3s ease-out;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 140px;
 }
 
-.toast-success {
-  background: #28a745;
-  border-left: 4px solid #1e7e34;
+.check-btn:hover {
+  background-color: var(--color-warning-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
-.toast-error {
-  background: #dc3545;
-  border-left: 4px solid #c82333;
-}
-
-.toast-warning {
-  background: #ffc107;
-  color: #856404;
-  border-left: 4px solid #e0a800;
-}
-
-.toast-close {
-  background: none;
+.remove-btn {
+  background-color: var(--color-danger);
+  color: white;
+  padding: 8px 16px;
   border: none;
-  color: inherit;
-  font-size: 1.5em;
+  border-radius: 4px;
   cursor: pointer;
-  margin-left: 15px;
-  opacity: 0.8;
+  font-size: 0.9em;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 100px;
 }
 
-.toast-close:hover {
-  opacity: 1;
+.remove-btn:hover {
+  background-color: var(--color-danger-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
-@keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
 .add-student {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 20px;
-  position: relative;
-  overflow: visible;
+  margin-top: 30px;
+  padding: 25px;
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
 }
 
 .custom-dropdown {
   position: relative;
   width: 100%;
-  overflow: visible;
+  margin-bottom: 15px;
 }
 
 .dropdown-header {
@@ -1030,40 +836,40 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 12px 15px;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  background-color: white;
+  border: 2px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background-color: var(--input-bg);
   cursor: pointer;
   transition: all 0.3s ease;
   min-height: 50px;
 }
 
 .dropdown-header:hover {
-  border-color: #17A2B8;
+  border-color: var(--color-primary);
 }
 
 .dropdown-header.dropdown-open {
-  border-color: #17A2B8;
+  border-color: var(--color-primary);
   box-shadow: 0 2px 8px rgba(23, 162, 184, 0.2);
 }
 
 .dropdown-header.has-selection {
-  border-color: #28a745;
-  background-color: #f8fff9;
+  border-color: var(--color-success);
+  background-color: rgba(40, 167, 69, 0.1);
 }
 
 .dropdown-placeholder {
-  color: #999;
+  color: var(--text-placeholder);
 }
 
 .selected-student {
   font-weight: 500;
-  color: #495057;
+  color: var(--text-primary);
 }
 
 .dropdown-arrow {
   transition: transform 0.3s ease;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .dropdown-open .dropdown-arrow {
@@ -1075,12 +881,13 @@ export default {
   top: 100%;
   left: 0;
   right: 0;
-  background: white;
-  border: 2px solid #17A2B8;
+  background: var(--bg-card);
+  border: 2px solid var(--color-primary);
   border-top: none;
-  border-radius: 0 0 8px 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  max-height: min(300px, calc(100vh - 200px));
+  border-radius: 0 0 var(--border-radius) var(--border-radius);
+  box-shadow: var(--shadow-lg);
+  /* Делаем список заметно выше, чтобы помещалось больше студентов */
+  max-height: min(500px, calc(100vh - 200px));
   overflow-y: auto;
   overflow-x: hidden;
   z-index: 1000;
@@ -1097,7 +904,7 @@ export default {
   padding: 12px 15px;
   cursor: pointer;
   transition: background-color 0.2s ease;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-color-light);
 }
 
 .dropdown-student-item:last-child {
@@ -1105,20 +912,20 @@ export default {
 }
 
 .dropdown-student-item:hover {
-  background-color: #f8f9fa;
+  background-color: var(--bg-hover);
 }
 
 .dropdown-student-item.selected {
-  background-color: #e8f5e8;
+  background-color: rgba(40, 167, 69, 0.1);
 }
 
 .dropdown-student-item.in-current-group {
-  background-color: #fffcf3;
+  background-color: rgba(255, 193, 7, 0.1);
   cursor: not-allowed;
 }
 
 .dropdown-student-item.in-other-group {
-  background-color: #fff5f5;
+  background-color: rgba(220, 53, 69, 0.1);
   cursor: not-allowed;
 }
 
@@ -1131,7 +938,7 @@ export default {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #17A2B8, #6f42c1);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-info));
   color: white;
   display: flex;
   align-items: center;
@@ -1142,22 +949,22 @@ export default {
   margin-top: 2px;
 }
 
-.student-info {
+.dropdown-student-item .student-info {
   flex: 1;
   min-width: 0;
 }
 
-.student-info h4 {
+.dropdown-student-item .student-info h4 {
   margin: 0 0 4px 0;
-  color: #495057;
+  color: var(--text-primary);
   font-size: 0.95em;
   font-weight: 500;
 }
 
-.student-info p {
+.dropdown-student-item .student-info p {
   margin: 0;
   font-size: 0.8em;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .status-text {
@@ -1167,15 +974,15 @@ export default {
 }
 
 .status-available {
-  color: #28a745;
+  color: var(--color-success);
 }
 
 .status-current {
-  color: #e0a800;
+  color: var(--color-warning);
 }
 
 .status-other {
-  color: #dc3545;
+  color: var(--color-danger);
 }
 
 .dropdown-loading,
@@ -1183,20 +990,20 @@ export default {
 .no-students {
   padding: 20px;
   text-align: center;
-  color: #666;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .dropdown-error {
-  color: #dc3545;
-  background-color: #f8d7da;
+  color: var(--color-danger);
+  background-color: var(--color-danger-light);
   margin: 8px;
   border-radius: 4px;
   padding: 15px;
 }
 
 .retry-btn {
-  background: #dc3545;
+  background: var(--color-danger);
   color: white;
   border: none;
   padding: 5px 10px;
@@ -1204,49 +1011,352 @@ export default {
   cursor: pointer;
   margin-left: 10px;
   font-size: 0.8em;
+  transition: all 0.3s ease;
+}
+
+.retry-btn:hover {
+  background: var(--color-danger-dark);
 }
 
 .selected-student-info {
   min-height: 20px;
   padding: 0 5px;
+  margin-bottom: 15px;
 }
 
 .warning-text {
-  color: #dc3545;
+  color: var(--color-danger);
   font-size: 0.9em;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .success-text {
-  color: #28a745;
+  color: var(--color-success);
   font-size: 0.9em;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .add-btn {
-  background-color: #28A745;
+  background-color: var(--color-success);
   color: white;
-  padding: 12px 20px;
+  padding: 12px 24px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   cursor: pointer;
   font-size: 1em;
   font-weight: 500;
-  transition: background-color 0.3s;
-  align-self: flex-start;
+  transition: all 0.3s ease;
+  width: 100%;
 }
 
 .add-btn:hover:not(:disabled) {
-  background-color: #218838;
+  background-color: var(--color-success-dark);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .add-btn:disabled {
-  background-color: #cccccc;
+  background-color: var(--color-secondary);
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  opacity: 0.6;
+}
+
+/* Student Tasks Tab */
+.student-header {
+  padding: 25px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.student-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.4em;
+  font-weight: 600;
+}
+
+.tasks-list {
+  padding: 25px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.task-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.3s ease;
+}
+
+.task-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.task-card h4 {
+  margin: 0 0 10px 0;
+  color: var(--text-primary);
+  font-size: 1.1em;
+  font-weight: 600;
+}
+
+.task-card .description {
+  color: var(--text-secondary);
+  margin: 10px 0;
+  font-size: 0.95em;
+  line-height: 1.4;
+}
+
+.task-card .deadline {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  margin: 5px 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-weight: 600;
+  display: inline-block;
+  font-size: 0.85em;
+  margin-top: 10px;
+}
+
+.status-not_started,
+.status-NOT_STARTED {
+  background-color: var(--task-not-started);
+  color: var(--task-not-started-text);
+}
+
+.status-in_progress,
+.status-IN_PROGRESS {
+  background-color: var(--task-in-progress);
+  color: var(--task-in-progress-text);
+}
+
+.status-completed,
+.status-COMPLETED {
+  background-color: var(--task-completed);
+  color: var(--task-completed-text);
+}
+
+.status-overdue,
+.status-OVERDUE {
+  background-color: var(--task-overdue);
+  color: var(--task-overdue-text);
+}
+
+.no-tasks {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+  font-style: italic;
+  grid-column: 1 / -1;
+}
+
+/* Модальное окно подтверждения удаления */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+.modal-content {
+  background: var(--bg-card);
+  padding: 30px;
+  border-radius: var(--border-radius);
+  width: 450px;
+  max-width: 90%;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-content h3 {
+  margin: 0 0 15px 0;
+  color: var(--text-primary);
+  font-size: 1.3em;
+  font-weight: 600;
+  text-align: center;
+}
+
+.modal-content p {
+  margin: 0 0 25px 0;
+  color: var(--text-secondary);
+  font-size: 1em;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+}
+
+.delete-btn {
+  background-color: var(--color-danger);
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  min-width: 120px;
+}
+
+.delete-btn:hover {
+  background-color: var(--color-danger-dark);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.cancel-btn {
+  background-color: var(--color-secondary);
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  min-width: 120px;
+}
+
+.cancel-btn:hover {
+  background-color: var(--color-secondary-dark);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Тосты */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 15px 20px;
+  border-radius: var(--border-radius);
+  color: white;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 300px;
+  max-width: 400px;
+  z-index: 2000;
+  animation: slideIn 0.3s ease-out;
+}
+
+.toast-success {
+  background: var(--color-success);
+  border-left: 4px solid var(--color-success-dark);
+}
+
+.toast-error {
+  background: var(--color-danger);
+  border-left: 4px solid var(--color-danger-dark);
+}
+
+.toast-warning {
+  background: var(--color-warning);
+  color: var(--text-light);
+  border-left: 4px solid var(--color-warning-dark);
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5em;
+  cursor: pointer;
+  margin-left: 15px;
+  opacity: 0.8;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.toast-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 /* Адаптивность */
 @media (max-width: 768px) {
+  .group-detail {
+    padding: 15px;
+  }
+
+  .group-header,
+  .students-tab,
+  .student-header {
+    padding: 20px;
+  }
+
+  .students-list {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+
+  .student-card {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .student-info {
+    width: 100%;
+  }
+
+  .student-actions {
+    flex-direction: column;
+  }
+
+  .check-btn,
+  .remove-btn {
+    width: 100%;
+    min-width: unset;
+  }
+
   .dropdown-content {
     position: fixed;
     top: 50%;
@@ -1255,27 +1365,129 @@ export default {
     width: 90vw;
     max-width: 400px;
     max-height: min(70vh, calc(100vh - 100px));
-    border-radius: 8px;
-    border: 2px solid #17A2B8;
+    border-radius: var(--border-radius);
+    border: 2px solid var(--color-primary);
   }
 
-  .dropdown-student-item {
-    padding: 15px;
+  .tabs {
+    padding: 0 15px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .tabs button {
+    padding: 12px 20px;
+  }
+
+  .tasks-list {
+    grid-template-columns: 1fr;
+    padding: 20px;
+  }
+
+  .modal-content {
+    padding: 20px;
+    margin: 20px;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+  }
+
+  .delete-btn,
+  .cancel-btn {
+    width: 100%;
   }
 }
-/* Адаптивность */
-@media (max-width: 768px) {
-  .available-students-list {
-    grid-template-columns: 1fr;
+
+@media (max-width: 480px) {
+  .group-detail {
+    padding: 10px;
   }
 
-  .student-select-item {
+  .group-header h2 {
+    font-size: 1.5em;
+  }
+
+  .student-header {
     flex-direction: column;
+    gap: 15px;
+    align-items: stretch;
+  }
+
+  .student-header h3 {
     text-align: center;
   }
 
-  .student-avatar {
-    align-self: center;
+  .back-btn {
+    width: 100%;
   }
+
+  .toast {
+    left: 10px;
+    right: 10px;
+    min-width: auto;
+    max-width: none;
+  }
+}
+
+/* Анимации */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.student-card,
+.task-card,
+.dropdown-student-item {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Прокрутка */
+.dropdown-content,
+.tasks-list,
+.students-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-primary) var(--bg-tertiary);
+}
+
+.dropdown-content::-webkit-scrollbar,
+.tasks-list::-webkit-scrollbar,
+.students-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dropdown-content::-webkit-scrollbar-track,
+.tasks-list::-webkit-scrollbar-track,
+.students-list::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+.dropdown-content::-webkit-scrollbar-thumb,
+.tasks-list::-webkit-scrollbar-thumb,
+.students-list::-webkit-scrollbar-thumb {
+  background: var(--color-primary);
+  border-radius: 3px;
+}
+
+.dropdown-content::-webkit-scrollbar-thumb:hover,
+.tasks-list::-webkit-scrollbar-thumb:hover,
+.students-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-dark);
+}
+
+/* Иконки */
+.warning-text::before {
+  content: '⚠️';
+}
+
+.success-text::before {
+  content: '✓';
 }
 </style>

@@ -25,6 +25,14 @@
         >
           Редактировать
         </button>
+        <button
+            v-if="!isSidebarCollapsed"
+            @click="toggleTheme"
+            class="theme-toggle-btn"
+            :title="getThemeTitle()"
+        >
+          {{ getThemeText() }}
+        </button>
         <button @click="logout" class="logout-btn" :title="isSidebarCollapsed ? 'Выйти' : ''">
           <span v-if="!isSidebarCollapsed">Выйти</span>
           <span v-else>🔒</span>
@@ -40,7 +48,7 @@
             :to="link.path"
             class="nav-link"
             :exact="link.path === '/profile'"
-            active-class="active"
+            exact-active-class="active"
             :title="isSidebarCollapsed ? link.title : ''"
         >
           <span class="nav-link-text" v-if="!isSidebarCollapsed">{{ link.title }}</span>
@@ -114,18 +122,19 @@
 import { ref, onMounted, computed, provide } from 'vue'
 import { useRouter } from 'vue-router'
 import api from "@/api/index.js";
+import {getCurrentTheme, initTheme, Theme, toggleTheme} from "@/utils/theme.js";
 
 export default {
   name: 'Profile',
   setup() {
     const router = useRouter()
 
-    // Правильно инициализируем user с начальными значениями
     const user = ref({
       username: '',
       email: '',
       role: ''
     })
+    const currentTheme = ref(getCurrentTheme())
 
     const availableLinks = ref([])
     const unreadNotificationsCount = ref(0)
@@ -168,7 +177,8 @@ export default {
         'calendar': '📅',
         'my-group': '👥',
         'video-meetings': '📹',
-        'notifications': '🔔'
+        'notifications': '🔔',
+        'kanban': '📌'
       }
       return iconMap[linkName] || '•'
     }
@@ -237,7 +247,6 @@ export default {
           { path: '/profile', title: 'Обзор', name: 'profile-overview' },
           { path: '/profile/groups', title: 'Управление группами', name: 'groups' },
           { path: '/profile/users', title: 'Управление пользователями', name: 'users' },
-          { path: '/profile/video-meetings', title: 'Видеовстречи', name: 'video-meetings' },
           { path: '/profile/notifications', title: 'Уведомления', name: 'notifications' }
         ],
         'ROLE_TEACHER': [
@@ -245,15 +254,16 @@ export default {
           { path: '/profile/tasks', title: 'Задачи', name: 'tasks' },
           { path: '/profile/groups', title: 'Группы', name: 'groups' },
           { path: '/profile/video-meetings', title: 'Видеовстречи', name: 'video-meetings' },
-          { path: '/profile/notifications', title: 'Уведомления', name: 'notifications' }
+          { path: '/profile/notifications', title: 'Уведомления', name: 'notifications' },
         ],
         'ROLE_STUDENT': [
           { path: '/profile', title: 'Обзор', name: 'profile-overview' },
+          { path: '/profile/kanban', title: 'Канбан-доска', name: 'kanban' },
           { path: '/profile/tasks', title: 'Мои задачи', name: 'tasks' },
           { path: '/profile/calendar', title: 'Календарь', name: 'calendar' },
           { path: '/profile/my-group', title: 'Моя группа', name: 'my-group' },
           { path: '/profile/video-meetings', title: 'Видеовстречи', name: 'video-meetings' },
-          { path: '/profile/notifications', title: 'Уведомления', name: 'notifications' }
+          { path: '/profile/notifications', title: 'Уведомления', name: 'notifications' },
         ]
       };
 
@@ -338,6 +348,43 @@ export default {
     const hideToast = () => {
       toast.value.show = false
     }
+    const handleToggleTheme = () => {
+      const newTheme = toggleTheme()
+      currentTheme.value = newTheme
+      // Можно добавить уведомление
+      showToast(`Тема изменена: ${getThemeText()}`, 'info')
+    }
+
+    const getThemeText = () => {
+      const texts = {
+        [Theme.LIGHT]: 'Светлая тема',
+        [Theme.DARK]: 'Тёмная тема',
+        [Theme.AUTO]: 'Авто тема'
+      }
+      return texts[currentTheme.value] || texts[Theme.LIGHT]
+    }
+
+    const getThemeIcon = () => {
+      const icons = {
+        [Theme.LIGHT]: '🌞',
+        [Theme.DARK]: '🌙',
+        [Theme.AUTO]: '🔄'
+      }
+      return icons[currentTheme.value] || icons[Theme.LIGHT]
+    }
+
+    const getThemeTitle = () => {
+      const titles = {
+        [Theme.LIGHT]: 'Светлая тема. Следующая: тёмная',
+        [Theme.DARK]: 'Тёмная тема. Следующая: авто',
+        [Theme.AUTO]: 'Авто тема. Следующая: светлая'
+      }
+      return titles[currentTheme.value] || titles[Theme.LIGHT]
+    }
+
+    // Предоставляем тему дочерним компонентам
+    provide('currentTheme', currentTheme)
+
 
     onMounted(() => {
       // Восстанавливаем состояние панели из localStorage
@@ -346,6 +393,7 @@ export default {
         isSidebarCollapsed.value = savedState === 'true'
       }
       fetchUserData()
+      initTheme()
     })
 
     return {
@@ -366,7 +414,12 @@ export default {
       closeEditModal,
       saveProfile,
       toast,
-      hideToast
+      hideToast,
+      currentTheme,
+      toggleTheme: handleToggleTheme,
+      getThemeText,
+      getThemeIcon,
+      getThemeTitle
     }
   }
 }
@@ -377,12 +430,13 @@ export default {
   display: flex;
   min-height: 100vh;
   width: 100vw;
+  background: var(--bg-primary);
 }
 
 .sidebar {
   width: 250px;
-  background: #2c3e50;
-  color: white;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
   padding: 20px;
   transition: width 0.3s ease;
   position: relative;
@@ -401,9 +455,9 @@ export default {
 }
 
 .toggle-btn {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--sidebar-hover);
   border: none;
-  color: white;
+  color: var(--sidebar-text);
   padding: 8px 12px;
   border-radius: 4px;
   cursor: pointer;
@@ -429,7 +483,8 @@ export default {
 .role-badge {
   display: inline-block;
   padding: 3px 8px;
-  background: #4a90e2;
+  background: var(--color-primary);
+  color: white;
   border-radius: 10px;
   font-size: 12px;
   margin-top: 5px;
@@ -437,7 +492,7 @@ export default {
 
 .logout-btn {
   margin-top: 15px;
-  background: #e74c3c;
+  background: var(--color-danger);
   color: white;
   border: none;
   padding: 8px 15px;
@@ -452,7 +507,7 @@ nav {
 }
 
 .nav-link {
-  color: white;
+  color: var(--sidebar-text);
   text-decoration: none;
   padding: 10px 15px;
   margin: 5px 0;
@@ -474,11 +529,11 @@ nav {
 }
 
 .nav-link:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--sidebar-hover);
 }
 
 .nav-link.active {
-  background: #4388c0;
+  background: var(--sidebar-active);
 }
 
 .nav-link-text {
@@ -487,7 +542,7 @@ nav {
 
 /* Стили для баджика уведомлений */
 .notification-badge {
-  background: #e74c3c;
+  background: var(--color-danger);
   color: white;
   border-radius: 10px;
   padding: 2px 6px;
@@ -519,13 +574,14 @@ nav {
 .main-content {
   flex: 1;
   padding: 30px 15px;
-  background: #f5f7fa;
+  background: var(--bg-primary);
+  overflow-y: auto;
 }
 
 /* Стили для кнопки редактирования профиля */
 .edit-profile-btn {
   margin-top: 10px;
-  background: #17A2B8;
+  background: var(--color-info);
   color: white;
   border: none;
   padding: 8px 15px;
@@ -537,7 +593,8 @@ nav {
 }
 
 .edit-profile-btn:hover {
-  background: #138ca1;
+  background: var(--color-info);
+  opacity: 0.9;
 }
 
 /* Стили для модального окна */
@@ -555,25 +612,25 @@ nav {
 }
 
 .modal-content {
-  background: white;
+  background: var(--bg-primary);
   padding: 30px;
   border-radius: 12px;
   width: 500px;
   max-width: 90%;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
   position: relative;
 }
 
 .modal-content h3 {
   margin: 0 0 20px 0;
-  color: #333;
+  color: var(--text-primary);
   font-size: 1.5em;
   font-weight: 600;
   text-align: center;
   padding-bottom: 15px;
-  border-bottom: 2px solid #e9ecef;
+  border-bottom: 2px solid var(--border-color);
 }
 
 .close {
@@ -582,7 +639,7 @@ nav {
   right: 20px;
   font-size: 28px;
   cursor: pointer;
-  color: #888;
+  color: var(--text-muted);
   transition: color 0.2s;
   line-height: 1;
   background: none;
@@ -596,7 +653,7 @@ nav {
 }
 
 .close:hover {
-  color: #333;
+  color: var(--text-primary);
 }
 
 .form-group {
@@ -606,14 +663,16 @@ nav {
 .form-group label {
   display: block;
   margin-bottom: 8px;
-  color: #495057;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
 .form-group input {
   width: 100%;
   padding: 10px 15px;
-  border: 2px solid #e0e0e0;
+  background: var(--input-bg);
+  border: 2px solid var(--border-color);
+  color: var(--input-text);
   border-radius: 8px;
   font-size: 1em;
   transition: border-color 0.3s;
@@ -622,12 +681,12 @@ nav {
 
 .form-group input:focus {
   outline: none;
-  border-color: #17A2B8;
+  border-color: var(--color-info);
   box-shadow: 0 0 0 3px rgba(23, 162, 184, 0.1);
 }
 
 .form-group input:disabled {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary);
   cursor: not-allowed;
 }
 
@@ -635,7 +694,7 @@ nav {
   display: block;
   margin-top: 5px;
   font-size: 0.85em;
-  color: #6c757d;
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -647,7 +706,7 @@ nav {
 }
 
 .cancel-btn {
-  background-color: #6c757d;
+  background-color: var(--color-secondary);
   color: white;
   padding: 10px 20px;
   border: none;
@@ -667,7 +726,7 @@ nav {
 }
 
 .save-btn {
-  background-color: #17A2B8;
+  background-color: var(--color-info);
   color: white;
   padding: 10px 20px;
   border: none;
@@ -695,7 +754,7 @@ nav {
   border-radius: 8px;
   color: white;
   font-weight: 500;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-lg);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -706,13 +765,18 @@ nav {
 }
 
 .toast-success {
-  background: #28a745;
+  background: var(--color-success);
   border-left: 4px solid #1e7e34;
 }
 
 .toast-error {
-  background: #dc3545;
+  background: var(--color-danger);
   border-left: 4px solid #c82333;
+}
+
+.toast-info {
+  background: var(--color-info);
+  border-left: 4px solid #138496;
 }
 
 .toast-close {
@@ -727,6 +791,23 @@ nav {
 
 .toast-close:hover {
   opacity: 1;
+}
+
+.theme-toggle-btn {
+  margin-top: 10px;
+  background: var(--color-warning);
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 100%;
+  font-size: 0.9em;
+  transition: background 0.3s;
+}
+
+.theme-toggle-btn:hover {
+  opacity: 0.9;
 }
 
 @keyframes slideIn {

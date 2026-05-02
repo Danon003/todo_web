@@ -87,6 +87,12 @@ const routes = [
                 name: 'video-meetings',
                 component: VideoMeetings,
                 meta: { requiresAuth: true, roles: ['ROLE_ADMIN', 'ROLE_TEACHER', 'ROLE_STUDENT'] }
+            },
+            {
+                path: 'kanban',
+                name: 'kanban',
+                component: () => import('@/views/profile/KanbanBoard.vue'),
+                meta: { roles: ['ROLE_STUDENT', 'ROLE_TEACHER'] }
             }
         ]
     },

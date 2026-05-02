@@ -84,22 +84,42 @@ export default {
   setup() {
     const currentDate = ref(new Date());
     const selectedDate = ref(null);
-    const tasks = ref([]);
+    const tasks = ref([]); // Теперь это будет массив, не Page
     const meetings = ref([]);
     const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+    const loading = ref(false);
 
     const fetchTasks = async () => {
       try {
-        const response = await api.getMyTasks();
-        tasks.value = response.data;
+        loading.value = true;
+        // Предполагаем, что API возвращает Page
+        const response = await api.getMyTasks(0, 1000); // Берем много задач для календаря
+
+        // Если API возвращает Page, берем content
+        if (response.data && response.data.content) {
+          tasks.value = response.data.content;
+        } else if (Array.isArray(response.data)) {
+          // Если возвращается просто массив
+          tasks.value = response.data;
+        } else {
+          // Если что-то другое, смотрим на data
+          console.warn('Unexpected tasks response:', response.data);
+          tasks.value = [];
+        }
+
+        console.log('Tasks loaded:', tasks.value.length);
       } catch (error) {
         console.error('Ошибка при получении задач:', error);
+        tasks.value = [];
+      } finally {
+        loading.value = false;
       }
     };
 
     const fetchMeetings = async () => {
       try {
         const response = await api.getVideoMeetings();
+        // Предполагаем, что API возвращает массив встреч
         meetings.value = response.data || [];
       } catch (error) {
         console.error('Ошибка при получении встреч:', error);
@@ -142,7 +162,6 @@ export default {
     });
 
     const firstDayOfMonth = computed(() => {
-      // Возвращаем день недели (0-6), где 0 - воскресенье
       return new Date(currentYear.value, currentMonth.value, 1).getDay();
     });
 
@@ -227,34 +246,44 @@ export default {
     });
 
     const hasTasksForDate = (date) => {
+      // Проверяем что tasks.value существует и является массивом
+      if (!Array.isArray(tasks.value)) {
+        console.warn('tasks.value is not an array:', tasks.value);
+        return false;
+      }
       return tasks.value.some(task => {
-        if (!task.deadline) return false;
+        if (!task || !task.deadline) return false;
         const taskDate = task.deadline.split('T')[0];
         return taskDate === date;
       });
     };
 
     const hasMeetingsForDate = (date) => {
+      // Проверяем что meetings.value существует и является массивом
+      if (!Array.isArray(meetings.value)) {
+        console.warn('meetings.value is not an array:', meetings.value);
+        return false;
+      }
       return meetings.value.some(meeting => {
-        if (!meeting.startTime) return false;
+        if (!meeting || !meeting.startTime) return false;
         const meetingDate = meeting.startTime.split('T')[0];
         return meetingDate === date;
       });
     };
 
     const tasksForSelectedDate = computed(() => {
-      if (!selectedDate.value) return [];
+      if (!selectedDate.value || !Array.isArray(tasks.value)) return [];
       return tasks.value.filter(task => {
-        if (!task.deadline) return false;
+        if (!task || !task.deadline) return false;
         const taskDate = task.deadline.split('T')[0];
         return taskDate === selectedDate.value;
       });
     });
 
     const meetingsForSelectedDate = computed(() => {
-      if (!selectedDate.value) return [];
+      if (!selectedDate.value || !Array.isArray(meetings.value)) return [];
       return meetings.value.filter(meeting => {
-        if (!meeting.startTime) return false;
+        if (!meeting || !meeting.startTime) return false;
         const meetingDate = meeting.startTime.split('T')[0];
         return meetingDate === selectedDate.value;
       });
@@ -352,7 +381,8 @@ export default {
       getMeetingStatus,
       prevMonth,
       nextMonth,
-      viewDayTasks
+      viewDayTasks,
+      loading
     };
   }
 };
@@ -362,19 +392,15 @@ export default {
 .calendar-container {
   margin: 0;
   padding: 0 40px 0 0;
-}
-
-@media (max-width: 1024px) {
-  .calendar-container {
-    padding-right: 0;
-  }
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .calendar-header {
   display: flex;
   justify-content: center;
   align-items: center;
-
+  margin-bottom: 20px;
 }
 
 .nav-btn {
@@ -383,53 +409,70 @@ export default {
   font-size: 1.5em;
   cursor: pointer;
   padding: 0 15px;
+  color: var(--text-primary);
 }
 
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 5px;
+  background: var(--calendar-bg);
+  border: 1px solid var(--calendar-border);
+  border-radius: var(--border-radius);
+  padding: 10px;
 }
 
 .day-header {
   text-align: center;
   font-weight: bold;
   padding: 10px;
-  background: #f0f0f0;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
 }
 
 .day-cell {
   height: 80px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color-light);
   padding: 5px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
+  background: var(--calendar-day-bg);
+  transition: all 0.2s ease;
 }
 
 .day-cell.current-month {
-  background: white;
+  background: var(--calendar-day-bg);
 }
 
 .day-cell:not(.current-month) {
-  background: #f9f9f9;
-  color: #aaa;
+  background: var(--calendar-day-other);
+  color: var(--text-muted);
 }
 
 .day-cell.today {
-  border: 2px solid #4CAF50;
+  border: 2px solid var(--color-primary);
+  background: var(--calendar-today);
 }
 
 .day-cell.has-tasks {
-  background: #e6f7ff;
+  background: var(--color-primary-light);
 }
 
 .day-cell.has-meetings {
-  border-color: rgba(13, 110, 253, 0.4);
+  border-color: var(--color-info);
+}
+
+.day-cell:hover {
+  background: var(--calendar-day-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .day-number {
   align-self: flex-end;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .indicator-row {
@@ -447,25 +490,26 @@ export default {
 }
 
 .indicator-task {
-  background-color: #ff4d4f;
+  background-color: var(--color-danger);
 }
 
 .indicator-meeting {
-  background-color: #0d6efd;
+  background-color: var(--color-info);
 }
 
 .day-events {
   margin-top: 30px;
   padding: 20px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
 }
 
 .section-block + .section-block {
   margin-top: 20px;
   padding-top: 20px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--border-color);
 }
 
 .tasks-list {
@@ -474,7 +518,10 @@ export default {
 
 .task-item {
   padding: 15px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  margin-bottom: 10px;
 }
 
 .task-item:last-child {
@@ -483,11 +530,12 @@ export default {
 
 .task-item h4 {
   margin: 0 0 5px 0;
+  color: var(--text-primary);
 }
 
 .deadline, .priority {
   margin: 5px 0;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.9em;
 }
 
@@ -498,35 +546,32 @@ export default {
   font-weight: bold;
   font-size: 0.9em;
 }
+
 .status-overdue {
-  background-color: #f8d7da;
-  color: #721c24;
+  background-color: var(--task-overdue);
+  color: var(--task-overdue-text);
 }
+
 .status-not_started {
-  background-color: #FFF3CD;
-  color: #856404;
+  background-color: var(--task-not-started);
+  color: var(--task-not-started-text);
 }
 
 .status-in_progress {
-  background-color: #D1ECF1;
-  color: #0C5460;
+  background-color: var(--task-in-progress);
+  color: var(--task-in-progress-text);
 }
 
 .status-completed {
-  background-color: #D4EDDA;
-  color: #155724;
+  background-color: var(--task-completed);
+  color: var(--task-completed-text);
 }
 
-.no-tasks {
+.no-tasks, .no-meetings {
   text-align: center;
   padding: 20px;
-  color: #666;
-}
-
-.no-meetings {
-  text-align: center;
-  padding: 20px;
-  color: #666;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .meetings-list {
@@ -537,9 +582,9 @@ export default {
 
 .meeting-item {
   padding: 15px;
-  border: 1px solid #eee;
-  border-radius: 8px;
-  background: #f8fbff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-card);
 }
 
 .meeting-header {
@@ -551,6 +596,7 @@ export default {
 
 .meeting-header h4 {
   margin: 0;
+  color: var(--text-primary);
 }
 
 .meeting-status {
@@ -561,28 +607,34 @@ export default {
 }
 
 .status-upcoming {
-  background: #e0f3ff;
-  color: #0b6efd;
+  background: var(--meeting-upcoming);
+  color: var(--meeting-upcoming-text);
 }
 
 .status-active {
-  background: #d4edda;
-  color: #155724;
+  background: var(--meeting-active);
+  color: var(--meeting-active-text);
 }
 
 .status-ended {
-  background: #fde2e1;
-  color: #a94442;
+  background: var(--meeting-ended);
+  color: var(--meeting-ended-text);
 }
 
 .meeting-time,
 .meeting-group,
 .meeting-description {
   margin: 4px 0;
-  color: #555;
+  color: var(--text-secondary);
 }
 
 .meeting-description {
   font-size: 0.9em;
+}
+
+@media (max-width: 1024px) {
+  .calendar-container {
+    padding-right: 0;
+  }
 }
 </style>

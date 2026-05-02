@@ -39,6 +39,39 @@
         </div>
       </div>
     </div>
+
+    <div
+        v-if="groupsTotalPages > 1"
+        class="pagination groups-pagination"
+    >
+      <button
+          class="pagination-btn"
+          @click="prevGroupsPage"
+          :disabled="groupsCurrentPage === 1"
+      >
+        ← Назад
+      </button>
+      <span class="pagination-info">
+        Страница {{ groupsCurrentPage }} из {{ groupsTotalPages }}
+        (всего: {{ groupsTotalElements }} групп)
+      </span>
+      <button
+          class="pagination-btn"
+          @click="nextGroupsPage"
+          :disabled="groupsCurrentPage === groupsTotalPages"
+      >
+        Вперёд →
+      </button>
+      <select
+          v-model="groupsPageSize"
+          @change="changeGroupsPageSize"
+          class="page-size-select"
+      >
+        <option :value="6">6 на странице</option>
+        <option :value="12">12 на странице</option>
+        <option :value="24">24 на странице</option>
+      </select>
+    </div>
     <!-- Модалка подтверждения удаления -->
     <div v-if="showDeleteConfirm" class="modal">
       <div class="modal-content">
@@ -108,7 +141,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import api from "@/api/index.js";
 
@@ -117,6 +150,9 @@ export default {
   setup() {
     const router = useRouter();
     const groups = ref([]);
+    const groupsCurrentPage = ref(1);
+    const groupsPageSize = ref(12);
+    const groupsTotalElements = ref(0);
     const studentsByGroup = ref({});
     const teachers = ref([]);
     const showCreateModal = ref(false);
@@ -155,15 +191,16 @@ export default {
     };
 
     onMounted(() => {
-       fetchTeachers(); // Сначала загружаем преподавателей
-       fetchGroups();
+      fetchTeachers(); // Сначала загружаем преподавателей
+      fetchGroups();
     });
     const fetchStudentsForGroup = async (groupId) => {
       try {
         const response = await api.getGroupStudents(groupId);
+        const students = Array.isArray(response.data) ? response.data : [];
         studentsByGroup.value = {
           ...studentsByGroup.value,
-          [groupId]: response.data
+          [groupId]: students
         };
       } catch (error) {
         console.error(`Ошибка при получении студентов группы ${groupId}:`, error);
@@ -176,8 +213,20 @@ export default {
 
     const fetchGroups = async () => {
       try {
-        const response = await api.getGroups();
-        groups.value = response.data;
+        const response = await api.getGroups(groupsCurrentPage.value - 1, groupsPageSize.value);
+        const data = response.data;
+
+        if (data && Array.isArray(data.content)) {
+          groups.value = data.content;
+          groupsTotalElements.value = data.totalElements ?? data.content.length;
+        } else if (Array.isArray(data)) {
+          groups.value = data;
+          groupsTotalElements.value = data.length;
+        } else {
+          groups.value = [];
+          groupsTotalElements.value = 0;
+        }
+
         groups.value.forEach(group => {
           fetchStudentsForGroup(group.id);
         });
@@ -189,16 +238,27 @@ export default {
 
     const fetchTeachers = async () => {
       try {
-        const response = await api.getUsersByRole('TEACHER');
-        teachers.value = response.data;
+        const response = await api.getUsersByRole('TEACHER', 0, 1000); // Загружаем всех преподавателей
+        const data = response.data;
+
+        // Обрабатываем пагинированный ответ
+        if (data && Array.isArray(data.content)) {
+          teachers.value = data.content;
+        } else if (Array.isArray(data)) {
+          teachers.value = data;
+        } else {
+          teachers.value = [];
+        }
       } catch (error) {
         console.error('Ошибка при получении преподавателей:', error);
         showToast('Не удалось загрузить список преподавателей', 'error');
+        teachers.value = [];
       }
     };
 
     const getTeacherName = (teacherId) => {
       if (!teacherId) return null;
+      if (!Array.isArray(teachers.value)) return `Преподаватель #${teacherId}`;
       const teacher = teachers.value.find(t => t.id === teacherId);
       return teacher ? teacher.username : `Преподаватель #${teacherId}`;
     };
@@ -267,10 +327,30 @@ export default {
       return studentsByGroup.value[groupId]?.length || 0;
     };
 
-    onMounted(() => {
-      fetchTeachers();
-      fetchGroups();
+    const groupsTotalPages = computed(() => {
+      return groupsPageSize.value > 0
+          ? Math.ceil(groupsTotalElements.value / groupsPageSize.value)
+          : 0;
     });
+
+    const nextGroupsPage = () => {
+      if (groupsCurrentPage.value < groupsTotalPages.value) {
+        groupsCurrentPage.value += 1;
+        fetchGroups();
+      }
+    };
+
+    const prevGroupsPage = () => {
+      if (groupsCurrentPage.value > 1) {
+        groupsCurrentPage.value -= 1;
+        fetchGroups();
+      }
+    };
+
+    const changeGroupsPageSize = () => {
+      groupsCurrentPage.value = 1;
+      fetchGroups();
+    };
 
     const viewGroup = (groupId) => {
       router.push(`/profile/groups/${groupId}`);
@@ -310,6 +390,13 @@ export default {
 
     return {
       groups,
+      groupsCurrentPage,
+      groupsPageSize,
+      groupsTotalElements,
+      groupsTotalPages,
+      nextGroupsPage,
+      prevGroupsPage,
+      changeGroupsPageSize,
       teachers,
       showCreateModal,
       showAssignTeacherModal,
@@ -339,6 +426,8 @@ export default {
 <style scoped>
 .groups-container {
   padding: 20px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .groups-header {
@@ -349,12 +438,17 @@ export default {
 }
 
 .create-btn {
-  background-color: #4CAF50;
-  color: white;
+  background-color: var(--btn-success-bg);
+  color: var(--btn-success-text);
   padding: 10px 15px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.create-btn:hover {
+  background-color: var(--btn-success-hover);
 }
 
 .groups-list {
@@ -363,18 +457,95 @@ export default {
   gap: 20px;
 }
 
-.group-card {
-  background: white;
-  border-radius: 8px;
-  padding: 15px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 20px 0;
+  padding: 15px 0;
+  border-top: 1px solid var(--border-color);
 }
 
+.pagination-btn {
+  padding: 8px 16px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
 
+.pagination-btn:hover:not(:disabled) {
+  background-color: #17A2B8;
+  color: white;
+  border-color: #17A2B8;
+}
+
+.pagination-btn:disabled {
+  background-color: #f8f9fa;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.page-size-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-text);
+  font-size: 0.9em;
+}
+
+@media (max-width: 768px) {
+  .pagination {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
+}
+
+.group-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 15px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.group-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.group-card h3 {
+  margin: 0 0 10px 0;
+  color: var(--text-primary);
+}
+
+.group-card p {
+  margin: 0 0 10px 0;
+  color: var(--text-secondary);
+}
+
+.group-meta {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  margin: 10px 0;
+  font-size: 0.9em;
+  color: var(--text-secondary);
+}
 
 .group-actions {
   display: flex;
   gap: 10px;
+  margin-top: 15px;
 }
 
 .action-btn {
@@ -382,18 +553,38 @@ export default {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.3s;
 }
 
 .view {
-  background-color: #17A2B8;
-  color: white;
+  background-color: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+}
+
+.view:hover {
+  background-color: var(--btn-primary-hover);
 }
 
 .delete {
-  background-color: #DC3545;
+  background-color: var(--btn-danger-bg);
+  color: var(--btn-danger-text);
+}
+
+.delete:hover {
+  background-color: var(--btn-danger-hover);
+}
+
+.assign {
+  background-color: var(--color-success);
   color: white;
 }
 
+.assign:hover {
+  background-color: var(--color-success-dark);
+}
+
+/* Модальные окна */
 .modal {
   position: fixed;
   top: 0;
@@ -408,17 +599,40 @@ export default {
 }
 
 .modal-content {
-  background: white;
+  background: var(--bg-card);
   padding: 20px;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   width: 500px;
   max-width: 90%;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.modal-content h3 {
+  margin: 0 0 15px 0;
+  color: var(--text-primary);
+}
+
+.modal-content p {
+  margin: 0 0 20px 0;
+  color: var(--text-secondary);
+}
+
+.modal-subtitle {
+  margin-bottom: 20px;
+  font-weight: bold;
+  color: var(--text-primary);
 }
 
 .close {
   float: right;
   font-size: 24px;
   cursor: pointer;
+  color: var(--text-muted);
+}
+
+.close:hover {
+  color: var(--text-primary);
 }
 
 .form-group {
@@ -428,32 +642,22 @@ export default {
 .form-group label {
   display: block;
   margin-bottom: 5px;
+  color: var(--text-secondary);
 }
 
 .form-group input,
 .form-group textarea {
   width: 100%;
   padding: 8px;
-  border: 1px solid #ddd;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--input-text);
   border-radius: 4px;
 }
 
 .form-group textarea {
   min-height: 100px;
-}
-
-.submit-btn {
-  background-color: #4CAF50;
-  color: white;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.modal-subtitle {
-  margin-bottom: 20px;
-  font-weight: bold;
-  color: #333;
+  resize: vertical;
 }
 
 .teachers-list {
@@ -467,42 +671,43 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 15px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   margin-bottom: 10px;
   cursor: pointer;
   transition: all 0.3s ease;
+  background: var(--bg-card);
 }
 
 .teacher-card:hover {
-  background-color: #f5f5f5;
+  background: var(--bg-hover);
 }
 
 .teacher-card.selected {
-  border-color: #4CAF50;
-  background-color: #f0fff0;
+  border-color: var(--color-success);
+  background: rgba(40, 167, 69, 0.1);
 }
 
 .teacher-info h4 {
   margin: 0 0 5px 0;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .teacher-info p {
   margin: 0 0 5px 0;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.9em;
 }
 
 .groups-count {
   font-size: 0.8em;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .teacher-check {
   width: 24px;
   height: 24px;
-  border: 2px solid #ddd;
+  border: 2px solid var(--border-color);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -510,8 +715,8 @@ export default {
 }
 
 .teacher-card.selected .teacher-check {
-  border-color: #4CAF50;
-  background-color: #4CAF50;
+  border-color: var(--color-success);
+  background-color: var(--color-success);
 }
 
 .checkmark {
@@ -526,94 +731,47 @@ export default {
 }
 
 .cancel-btn {
-  background-color: #6c757d;
-  color: white;
+  background-color: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
   padding: 10px 15px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
 }
 
-.submit-btn:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
+.cancel-btn:hover {
+  background-color: var(--btn-secondary-hover);
 }
 
-.teacher-info {
-  flex: 1;
-}
-.teachers-list {
-  max-height: 400px;
-  overflow-y: auto;
-  margin-bottom: 20px;
-}
-
-.teacher-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  margin-bottom: 10px;
+.submit-btn {
+  background-color: var(--btn-success-bg);
+  color: var(--btn-success-text);
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
   cursor: pointer;
 }
 
-.teacher-card:hover {
-  background-color: #f5f5f5;
+.submit-btn:hover:not(:disabled) {
+  background-color: var(--btn-success-hover);
 }
-
-.teacher-card.selected {
-  border-color: #4CAF50;
-  background-color: #f0fff0;
-}
-
-.teacher-info h4 {
-  margin: 0 0 5px 0;
-}
-
-.teacher-info p {
-  margin: 0;
-  color: #666;
-}
-
-.teacher-check {
-  width: 24px;
-  height: 24px;
-  border: 2px solid #ddd;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.teacher-card.selected .teacher-check {
-  border-color: #4CAF50;
-  background-color: #4CAF50;
-}
-
-.checkmark {
-  color: white;
-  font-weight: bold;
-}
-
 
 .submit-btn:disabled {
-  background-color: #cccccc;
+  background-color: var(--color-secondary);
   cursor: not-allowed;
 }
+
 .no-teacher {
-  color: #dc3545;
+  color: var(--color-danger);
   font-style: italic;
 }
-.assign {
-  background-color: #11ab42;
-  color: white;
-}
+
 .teacher-info {
-  color: #28a745;
+  color: var(--color-success);
   font-weight: 500;
 }
+
+/* Тосты */
 .toast {
   position: fixed;
   top: 20px;
@@ -622,7 +780,7 @@ export default {
   border-radius: 8px;
   color: white;
   font-weight: 500;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-lg);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -633,19 +791,19 @@ export default {
 }
 
 .toast-success {
-  background: #28a745;
-  border-left: 4px solid #1e7e34;
+  background: var(--color-success);
+  border-left: 4px solid var(--color-success-dark);
 }
 
 .toast-error {
-  background: #dc3545;
-  border-left: 4px solid #c82333;
+  background: var(--color-danger);
+  border-left: 4px solid var(--color-danger-dark);
 }
 
 .toast-warning {
-  background: #ffc107;
+  background: var(--color-warning);
   color: #856404;
-  border-left: 4px solid #e0a800;
+  border-left: 4px solid var(--color-warning-dark);
 }
 
 .toast-close {
@@ -672,276 +830,4 @@ export default {
     opacity: 1;
   }
 }
-
-/* Остальные стили без изменений */
-.groups-container {
-  padding: 20px;
-}
-
-.groups-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.create-btn {
-  background-color: #4CAF50;
-  color: white;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.groups-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 20px;
-}
-
-.group-card {
-  background: white;
-  border-radius: 8px;
-  padding: 15px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.group-meta {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  margin: 10px 0;
-  font-size: 0.9em;
-  color: #666;
-}
-
-.group-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.action-btn {
-  padding: 5px 10px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.view {
-  background-color: #17A2B8;
-  color: white;
-}
-
-.delete {
-  background-color: #DC3545;
-  color: white;
-}
-
-.close {
-  float: right;
-  font-size: 24px;
-  cursor: pointer;
-}
-
-.form-group {
-  margin-bottom: 15px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 5px;
-}
-
-.form-group input,
-.form-group textarea {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-.form-group textarea {
-  min-height: 100px;
-}
-
-.submit-btn {
-  background-color: #4CAF50;
-  color: white;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.modal-subtitle {
-  margin-bottom: 20px;
-  font-weight: bold;
-  color: #333;
-}
-
-.teachers-list {
-  max-height: 400px;
-  overflow-y: auto;
-  margin-bottom: 20px;
-}
-
-.teacher-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  margin-bottom: 10px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.teacher-card:hover {
-  background-color: #f5f5f5;
-}
-
-.teacher-card.selected {
-  border-color: #4CAF50;
-  background-color: #f0fff0;
-}
-
-.teacher-info h4 {
-  margin: 0 0 5px 0;
-  color: #333;
-}
-
-.teacher-info p {
-  margin: 0 0 5px 0;
-  color: #666;
-  font-size: 0.9em;
-}
-
-.groups-count {
-  font-size: 0.8em;
-  color: #888;
-}
-
-.teacher-check {
-  width: 24px;
-  height: 24px;
-  border: 2px solid #ddd;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.teacher-card.selected .teacher-check {
-  border-color: #4CAF50;
-  background-color: #4CAF50;
-}
-
-.checkmark {
-  color: white;
-  font-weight: bold;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-.cancel-btn {
-  background-color: #6c757d;
-  color: white;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.submit-btn:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
-}
-
-.teacher-info {
-  flex: 1;
-}
-
-.no-teacher {
-  color: #dc3545;
-  font-style: italic;
-}
-
-.assign {
-  background-color: #11ab42;
-  color: white;
-}
-
-.teacher-info {
-  color: #28a745;
-  font-weight: 500;
-}
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0,0,0,0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  width: 500px;
-  max-width: 90%;
-}
-
-.modal-content h3 {
-  margin: 0 0 15px 0;
-  color: #dc3545;
-}
-
-.modal-content p {
-  margin: 0 0 20px 0;
-  color: #666;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-.delete-btn {
-  background-color: #dc3545;
-  color: white;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.delete-btn:hover {
-  background-color: #c82333;
-}
-
-.cancel-btn {
-  background-color: #6c757d;
-  color: white;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.cancel-btn:hover {
-  background-color: #5a6268;
-}
-
 </style>

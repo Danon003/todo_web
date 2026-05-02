@@ -98,7 +98,7 @@ export default {
   align-items: center;
   min-height: 100vh;
   width: 100vw;
-  background-color: #f5f5f7;
+  background: var(--bg-secondary);
   margin: 0;
   padding: 0;
 }
@@ -107,8 +107,8 @@ export default {
   width: 100%;
   max-width: 100%;
   padding: 2rem;
-  background: white;
-  box-shadow: none;
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -117,7 +117,7 @@ export default {
 h2 {
   text-align: center;
   margin-bottom: 30px;
-  color: #333;
+  color: var(--text-primary);
   font-size: 28px;
   font-weight: 600;
 }
@@ -130,7 +130,7 @@ label {
   display: block;
   margin-bottom: 10px;
   font-size: 16px;
-  color: #555;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -138,7 +138,9 @@ label {
   width: 100%;
   padding: 15px;
   font-size: 16px;
-  border: 1px solid #ddd;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  color: var(--input-text);
   border-radius: 6px;
   box-sizing: border-box;
   transition: border-color 0.3s, box-shadow 0.3s;
@@ -155,28 +157,34 @@ label {
   padding: 1.2rem;
   font-size: clamp(1rem, 2vw, 1.2rem);
   margin-top: 1rem;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
 }
 
 .submit-btn:hover {
-  background-color: rgba(79, 119, 79, 0.78);
+  opacity: 0.9;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(167, 238, 153, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
 .submit-btn:active {
   transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(170, 250, 170, 0.3);
+  box-shadow: var(--shadow-sm);
 }
 
 .auth-link {
   text-align: center;
   margin-top: 20px;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 15px;
 }
 
 .auth-link a {
-  color: #00bc85;
+  color: var(--color-primary);
   text-decoration: none;
   font-weight: 500;
 }
@@ -186,14 +194,14 @@ label {
 }
 
 .error-message {
-  color: #e74c3c;
+  color: var(--color-danger);
   text-align: center;
   margin-top: 20px;
   font-size: 15px;
 }
 
 .success-message {
-  color: #06d6a0;
+  color: var(--color-success);
   text-align: center;
   margin-top: 20px;
   font-size: 15px;
@@ -203,11 +211,12 @@ label {
   .register-form {
     max-width: 450px;
     border-radius: 1rem;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-lg);
     height: auto;
     padding: 3rem;
   }
 }
+
 @media (max-width: 767px) {
   .register-container {
     padding: 0;
